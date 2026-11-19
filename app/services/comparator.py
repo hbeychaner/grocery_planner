@@ -1,0 +1,193 @@
+import asyncio
+import logging
+from decimal import Decimal
+from pathlib import Path
+from typing import Dict, List, Optional
+import yaml
+
+from app.clients.base import BaseStoreClient
+from app.core.config import settings
+from app.models.enums import PriceAdvantage, StoreType
+from app.models.product import StoreProduct
+from app.models.comparison import (
+    BasketComparisonItem,
+    BasketComparisonResponse,
+    ComparisonResponse,
+    MatchedProductPair,
+)
+from app.models.staples import StapleDefinition, StaplesCatalog
+from app.services.bilingual import BilingualQueryService
+from app.services.matcher import ProductMatchingService
+from app.services.voice_formatter import VoiceResponseFormatter
+
+logger = logging.getLogger(__name__)
+
+
+class PriceComparisonService:
+    """Core domain service orchestrating price comparisons between stores."""
+
+    def __init__(
+        self,
+        rohlik_client: BaseStoreClient,
+        kosik_client: BaseStoreClient,
+        bilingual_service: Optional[BilingualQueryService] = None,
+        matching_service: Optional[ProductMatchingService] = None,
+        voice_formatter: Optional[VoiceResponseFormatter] = None,
+        staples_path: Optional[Path] = None,
+    ) -> None:
+        self.rohlik = rohlik_client
+        self.kosik = kosik_client
+        self.bilingual = bilingual_service or BilingualQueryService()
+        self.matcher = matching_service or ProductMatchingService(
+            min_similarity_threshold=settings.min_match_similarity_score
+        )
+        self.formatter = voice_formatter or VoiceResponseFormatter()
+        self.staples_path = staples_path or settings.staples_config_path
+        self._staples: Dict[str, StapleDefinition] = {}
+        self._load_staples()
+
+    def _load_staples(self) -> None:
+        """Load staple item catalog from YAML."""
+        if not self.staples_path.exists():
+            logger.warning(f"Staples file not found at {self.staples_path}")
+            return
+
+        try:
+            with open(self.staples_path, "r", encoding="utf-8") as f:
+                raw_data = yaml.safe_load(f)
+            catalog = StaplesCatalog.model_validate(raw_data)
+            for item in catalog.staples:
+                self._staples[item.id] = item
+                for kw in item.keywords:
+                    self._staples[kw.lower()] = item
+        except Exception as exc:
+            logger.error(f"Failed to load staples catalog: {exc}")
+
+    def get_all_staples(self) -> List[StapleDefinition]:
+        """Return unique configured staple items."""
+        seen = set()
+        unique: List[StapleDefinition] = []
+        for s in self._staples.values():
+            if s.id not in seen:
+                seen.add(s.id)
+                unique.append(s)
+        return unique
+
+    async def compare_single_item(self, query: str) -> ComparisonResponse:
+        """Compare a single grocery item between Rohlik and Kosik."""
+        clean_query = query.strip()
+        staple = self._staples.get(clean_query.lower())
+
+        if staple:
+            rohlik_term = staple.rohlik_query
+            kosik_term = staple.kosik_query
+            translated_term = staple.name_cs
+        else:
+            translated_term, _ = self.bilingual.translate_to_czech(clean_query)
+            rohlik_term = translated_term
+            kosik_term = translated_term
+
+        # Fetch in parallel
+        rohlik_task = self.rohlik.search(rohlik_term, limit=5)
+        kosik_task = self.kosik.search(kosik_term, limit=5)
+
+        r_products, k_products = await asyncio.gather(
+            rohlik_task, kosik_task, return_exceptions=True
+        )
+
+        r_list: List[StoreProduct] = r_products if isinstance(r_products, list) else []
+        k_list: List[StoreProduct] = k_products if isinstance(k_products, list) else []
+
+        best_pair = self.matcher.find_best_pair(clean_query, translated_term, r_list, k_list)
+
+        if not best_pair:
+            voice_en = self.formatter.format_single_item_en(None, clean_query)
+            voice_cs = self.formatter.format_single_item_cs(None, clean_query)
+            return ComparisonResponse(
+                query=clean_query,
+                query_translated=translated_term,
+                advantage=PriceAdvantage.UNAVAILABLE,
+                cheapest_store=None,
+                price_difference=Decimal("0.00"),
+                percentage_savings=Decimal("0.0"),
+                voice_summary_en=voice_en,
+                voice_summary_cs=voice_cs,
+                primary_pair=None,
+                all_pairs=[],
+                rohlik_candidates=r_list,
+                kosik_candidates=k_list,
+            )
+
+        voice_en = self.formatter.format_single_item_en(best_pair, clean_query)
+        voice_cs = self.formatter.format_single_item_cs(best_pair, clean_query)
+
+        return ComparisonResponse(
+            query=clean_query,
+            query_translated=translated_term,
+            advantage=best_pair.advantage,
+            cheapest_store=best_pair.cheaper_store,
+            price_difference=best_pair.price_difference,
+            percentage_savings=best_pair.percentage_savings,
+            voice_summary_en=voice_en,
+            voice_summary_cs=voice_cs,
+            primary_pair=best_pair,
+            all_pairs=[best_pair],
+            rohlik_candidates=r_list,
+            kosik_candidates=k_list,
+        )
+
+    async def compare_basket(self, items: List[BasketComparisonItem]) -> BasketComparisonResponse:
+        """Compare a multi-item grocery basket across both stores."""
+        pairs: List[MatchedProductPair] = []
+        total_rohlik = Decimal("0.00")
+        total_kosik = Decimal("0.00")
+
+        # Compare items concurrently
+        tasks = [self.compare_single_item(item.query) for item in items]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for item, res in zip(items, results):
+            if isinstance(res, ComparisonResponse) and res.primary_pair:
+                pair = res.primary_pair
+                pairs.append(pair)
+                qty = Decimal(item.quantity)
+                if pair.rohlik_product:
+                    total_rohlik += pair.rohlik_product.price * qty
+                if pair.kosik_product:
+                    total_kosik += pair.kosik_product.price * qty
+
+        if total_rohlik == total_kosik:
+            advantage = PriceAdvantage.TIED
+            cheapest_store = None
+            diff = Decimal("0.00")
+            pct = Decimal("0.0")
+            summary = f"Both stores have identical basket total: {total_rohlik:.2f} CZK."
+        elif total_rohlik < total_kosik:
+            advantage = PriceAdvantage.ROHLIK_CHEAPER
+            cheapest_store = StoreType.ROHLIK
+            diff = total_kosik - total_rohlik
+            pct = Decimal(round((diff / total_kosik) * 100, 1)) if total_kosik > 0 else Decimal("0.0")
+            summary = (
+                f"Rohlik is cheaper for your basket at {total_rohlik:.2f} CZK "
+                f"compared to {total_kosik:.2f} CZK on Kosik, saving you {diff:.2f} CZK ({pct}%)."
+            )
+        else:
+            advantage = PriceAdvantage.KOSIK_CHEAPER
+            cheapest_store = StoreType.KOSIK
+            diff = total_rohlik - total_kosik
+            pct = Decimal(round((diff / total_rohlik) * 100, 1)) if total_rohlik > 0 else Decimal("0.0")
+            summary = (
+                f"Kosik is cheaper for your basket at {total_kosik:.2f} CZK "
+                f"compared to {total_rohlik:.2f} CZK on Rohlik, saving you {diff:.2f} CZK ({pct}%)."
+            )
+
+        return BasketComparisonResponse(
+            total_rohlik=total_rohlik,
+            total_kosik=total_kosik,
+            advantage=advantage,
+            cheapest_store=cheapest_store,
+            savings=diff,
+            percentage_savings=pct,
+            voice_summary_en=summary,
+            items=pairs,
+        )

@@ -1,0 +1,50 @@
+staples:
+  - id: "whole_milk_1l"
+    name_en: "Whole Milk 1L"
+    name_cs: "Plnotučné mléko 1L"
+    category: "dairy"
+    default_unit: "l"
+    expected_amount: 1.0
+    rohlik_query: "plnotučné mléko 1l"
+    kosik_query: "plnotučné mléko 1l"
+    keywords: ["milk", "whole milk", "mléko", "plnotučné mléko"]
+
+  - id: "butter_250g"
+    name_en: "Butter 250g"
+    name_cs: "Máslo 250g"
+    category: "dairy"
+    default_unit: "g"
+    expected_amount: 250.0
+    rohlik_query: "máslo 250g"
+    kosik_query: "máslo 250g"
+    keywords: ["butter", "máslo", "jihočeské máslo"]
+
+  - id: "eggs_m_10"
+    name_en: "Eggs M (10 pcs)"
+    name_cs: "Vejce M (10 ks)"
+    category: "dairy_eggs"
+    default_unit: "pcs"
+    expected_amount: 10.0
+    rohlik_query: "vejce M 10 ks"
+    kosik_query: "vejce M 10 ks"
+    keywords: ["eggs", "vejce", "vajíčka"]
+
+  - id: "bananas_1kg"
+    name_en: "Bananas 1kg"
+    name_cs: "Banány 1kg"
+    category: "produce"
+    default_unit: "kg"
+    expected_amount: 1.0
+    rohlik_query: "banány"
+    kosik_query: "banány"
+    keywords: ["banana", "bananas", "banány"]
+
+  - id: "pilsner_urquell_05l"
+    name_en: "Pilsner Urquell 0.5L"
+    name_cs: "Pilsner Urquell 0.5L"
+    category: "beverages"
+    default_unit: "l"
+    expected_amount: 0.5
+    rohlik_query: "pilsner urquell 0.5l"
+    kosik_query: "pilsner urquell 0.5l"
+    keywords: ["pilsner", "pilsner urquell", "plzeň", "pivo", "beer"]

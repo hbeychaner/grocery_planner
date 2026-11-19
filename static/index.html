@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Grocery Price Comparator — Košík vs. Rohlík</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="brand">
+        <span class="brand-icon">🛒</span>
+        <div>
+          <h1>Grocery Price Comparator</h1>
+          <p class="subtitle">Košík.cz vs. Rohlík.cz &bull; <span class="badge-location">📍 Prague (Vinohrady)</span></p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <a href="/docs" target="_blank" class="btn btn-outline">API Docs</a>
+        <button id="btn-toggle-ifttt" class="btn btn-primary">Google Home / IFTTT Setup</button>
+      </div>
+    </header>
+
+    <!-- Search Section -->
+    <section class="search-section">
+      <form id="search-form" class="search-form">
+        <div class="search-input-wrapper">
+          <span class="search-icon">🔍</span>
+          <input 
+            type="text" 
+            id="search-input" 
+            placeholder="Search any product (e.g., 'butter', 'whole milk', 'eggs', 'pilsner urquell')..." 
+            autocomplete="off" 
+            required 
+          />
+          <button type="submit" id="search-btn" class="btn btn-accent">Compare</button>
+        </div>
+      </form>
+
+      <!-- Quick Staples Chips -->
+      <div class="staples-wrapper">
+        <span class="staples-label">Quick Staples:</span>
+        <div id="staples-list" class="staples-chips">
+          <button class="chip" data-query="butter">🧈 Butter 250g</button>
+          <button class="chip" data-query="whole milk">🥛 Milk 1L</button>
+          <button class="chip" data-query="eggs">🥚 Eggs 10pcs</button>
+          <button class="chip" data-query="pilsner urquell">🍺 Pilsner 0.5L</button>
+          <button class="chip" data-query="bananas">🍌 Bananas 1kg</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Loader -->
+    <div id="loader" class="loader-container hidden">
+      <div class="spinner"></div>
+      <p>Querying Rohlík and Košík in parallel...</p>
+    </div>
+
+    <!-- Results Section -->
+    <main id="results-section" class="results-section hidden">
+      <!-- Voice Simulation Banner -->
+      <div class="voice-card">
+        <div class="voice-header">
+          <span class="voice-icon">🎙️</span>
+          <h3>Google Home Voice Response</h3>
+          <button id="btn-speak" class="btn-icon" title="Listen to speech">🔊 Read Aloud</button>
+        </div>
+        <p id="voice-text" class="voice-text"></p>
+      </div>
+
+      <!-- Comparison Winner Announcement -->
+      <div id="winner-banner" class="winner-banner"></div>
+
+      <!-- Side by Side Product Grid -->
+      <div class="comparison-grid">
+        <!-- Rohlik Card -->
+        <div class="store-card" id="card-rohlik">
+          <div class="store-badge rohlik-badge">
+            <span class="store-dot"></span> Rohlík.cz
+          </div>
+          <div class="card-content" id="rohlik-content">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+
+        <!-- Kosik Card -->
+        <div class="store-card" id="card-kosik">
+          <div class="store-badge kosik-badge">
+            <span class="store-dot"></span> Košík.cz
+          </div>
+          <div class="card-content" id="kosik-content">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- IFTTT Modal -->
+    <div id="ifttt-modal" class="modal hidden">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>Google Home & IFTTT Setup Guide</h2>
+          <button id="btn-close-modal" class="close-btn">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p>You can connect your Google Home / Google Assistant to this application in 2 minutes:</p>
+          <ol class="setup-steps">
+            <li>Open <a href="https://ifttt.com/create" target="_blank">IFTTT Applet Creator</a>.</li>
+            <li><strong>If This:</strong> Choose <em>Google Assistant</em> &rarr; <em>"Say a phrase with a text ingredient"</em>.</li>
+            <li>Enter trigger phrases:
+              <code>Check price of $</code> or <code>Compare price of $</code>.
+            </li>
+            <li><strong>Then That:</strong> Choose <em>Webhooks</em> &rarr; <em>"Make a web request"</em>.</li>
+            <li>Configure the webhook:
+              <ul>
+                <li><strong>URL:</strong> <code id="webhook-url-sample">https://&lt;your-domain&gt;/api/v1/voice/ifttt</code></li>
+                <li><strong>Method:</strong> <code>POST</code></li>
+                <li><strong>Content-Type:</strong> <code>application/json</code></li>
+                <li><strong>Body:</strong> <code>{"ingredient": "{{TextField}}"}</code></li>
+              </ul>
+            </li>
+          </ol>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+      <p>Grocery Price Comparator &bull; Built with FastAPI, Pydantic & Docker</p>
+    </footer>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
