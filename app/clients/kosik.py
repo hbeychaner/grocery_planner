@@ -1,6 +1,8 @@
+import asyncio
 import logging
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote
 import httpx
 from app.clients.base import BaseStoreClient
 from app.core.config import settings
@@ -11,7 +13,9 @@ logger = logging.getLogger(__name__)
 
 
 class KosikStoreClient(BaseStoreClient):
-    """Client for Košík.cz online supermarket."""
+    """Client for Košík.cz using Constructor search + front product detail API."""
+
+    CONSTRUCTOR_KEY = "key_KaoSi20AnZwxsIZ5"
 
     def __init__(
         self,
@@ -42,7 +46,6 @@ class KosikStoreClient(BaseStoreClient):
                 headers["Authorization"] = f"Bearer {self.user_token}"
 
             self._http_client = httpx.AsyncClient(
-                base_url=self.base_url,
                 headers=headers,
                 timeout=self.timeout,
                 follow_redirects=True,
@@ -50,73 +53,74 @@ class KosikStoreClient(BaseStoreClient):
         return self._http_client
 
     async def search(self, query: str, limit: int = 5) -> List[StoreProduct]:
-        """Search products on Kosik using public front catalog endpoint."""
+        """Search products on Kosik using Constructor.io + product details."""
         client = await self._get_client()
-        # Kosik search uses slug or search query
-        slug_encoded = query.strip().replace(" ", "-").lower()
-        endpoints = [
-            (f"/api/front/page/search?slug={slug_encoded}&limit={limit}", "get"),
-            ("/api/front/products", "get_params"),
-        ]
+        encoded_query = quote(query.strip())
+        search_url = (
+            f"https://ac.cnstrc.com/search/{encoded_query}"
+            f"?key={self.CONSTRUCTOR_KEY}&num_results_per_page={limit}"
+        )
 
-        raw_products: List[Dict[str, Any]] = []
+        try:
+            resp = await client.get(search_url)
+            if resp.status_code != 200:
+                logger.warning(f"Kosik search returned status {resp.status_code} for '{query}'")
+                return []
 
-        for endpoint, method_type in endpoints:
-            try:
-                if method_type == "get":
-                    response = await client.get(endpoint)
-                else:
-                    response = await client.get(endpoint, params={"search": query, "limit": limit})
+            results = resp.json().get("response", {}).get("results", [])
+            product_items: List[Dict[str, Any]] = []
+            for item in results:
+                data = item.get("data", {})
+                pid = data.get("id")
+                if pid:
+                    product_items.append({
+                        "id": str(pid),
+                        "fallback_title": item.get("value"),
+                        "image_url": data.get("image_url"),
+                        "url": data.get("url"),
+                    })
 
-                if response.status_code == 200:
-                    data = response.json()
-                    # Kosik payload can be structured in page.products or items or products
-                    if isinstance(data, dict):
-                        page_data = data.get("page", {})
-                        if isinstance(page_data, dict):
-                            raw_products = page_data.get("products", {}).get("items", [])
-                        if not raw_products:
-                            raw_products = data.get("products", {}).get("items", [])
-                        if not raw_products:
-                            raw_products = data.get("items", []) or data.get("data", [])
+            if not product_items:
+                return []
 
-                    if raw_products:
-                        break
-            except Exception as exc:
-                logger.debug(f"Kosik search endpoint '{endpoint}' error: {exc}")
-                continue
+            fetch_tasks = [self.get_by_id(item["id"]) for item in product_items[:limit]]
+            detailed_products = await asyncio.gather(*fetch_tasks, return_exceptions=True)
 
-        products: List[StoreProduct] = []
-        for item in raw_products[:limit]:
-            try:
-                product = self._parse_product(item)
-                if product:
-                    products.append(product)
-            except Exception as exc:
-                logger.debug(f"Failed to parse Kosik item: {exc}")
-                continue
+            products: List[StoreProduct] = []
+            for prod in detailed_products:
+                if isinstance(prod, StoreProduct) and prod:
+                    products.append(prod)
 
-        return products
+            return products
+
+        except Exception as exc:
+            logger.warning(f"Error during Kosik search for '{query}': {exc}")
+            return []
 
     async def get_by_id(self, product_id: str) -> Optional[StoreProduct]:
-        """Fetch details of a single product on Kosik."""
+        """Fetch details of a single product on Kosik by ID."""
         client = await self._get_client()
+        url = f"https://www.kosik.cz/api/front/product/{product_id}"
+
         try:
-            response = await client.get(f"/api/front/product/{product_id}")
+            response = await client.get(url)
             if response.status_code == 200:
                 data = response.json()
-                item = data.get("product") or data.get("data") or data
-                return self._parse_product(item)
+                raw_prod = data.get("product", {})
+                if raw_prod:
+                    return self._parse_product(raw_prod)
         except Exception as exc:
-            logger.warning(f"Error fetching Kosik product {product_id}: {exc}")
+            logger.debug(f"Error fetching Kosik product {product_id}: {exc}")
+
         return None
 
     async def health_check(self) -> bool:
-        """Verify Kosik accessibility."""
+        """Verify Kosik reachability."""
         try:
             client = await self._get_client()
-            resp = await client.get("/api/front/page/search?slug=test&limit=1")
-            return resp.status_code in (200, 404)
+            search_url = f"https://ac.cnstrc.com/search/test?key={self.CONSTRUCTOR_KEY}&num_results_per_page=1"
+            resp = await client.get(search_url)
+            return resp.status_code == 200
         except Exception:
             return False
 
@@ -128,56 +132,80 @@ class KosikStoreClient(BaseStoreClient):
     def _parse_product(self, item: Dict[str, Any]) -> Optional[StoreProduct]:
         """Convert Kosik JSON item into normalized StoreProduct."""
         product_id = str(item.get("id") or item.get("productId") or "")
-        name = item.get("name") or item.get("title")
+        name = item.get("name") or item.get("cleanName")
         if not product_id or not name:
             return None
 
+        # Brand parsing (can be dict with 'name' or string)
+        brand_raw = item.get("brand")
+        if isinstance(brand_raw, dict):
+            brand = brand_raw.get("name")
+        elif brand_raw:
+            brand = str(brand_raw)
+        else:
+            brand = None
+
         # Price parsing
-        price_val = item.get("price")
-        if isinstance(price_val, dict):
-            price_raw = price_val.get("amount") or price_val.get("full") or 0.0
+        price_raw = item.get("price")
+        if isinstance(price_raw, dict):
+            price_val = price_raw.get("price") or price_raw.get("amount") or 0.0
         else:
-            price_raw = price_val or 0.0
-        price = Decimal(str(price_raw))
+            price_val = price_raw or 0.0
+        price = Decimal(str(price_val))
 
-        # Original / sale price
-        orig_price_val = item.get("originalPrice") or item.get("oldPrice")
-        if isinstance(orig_price_val, dict):
-            orig_raw = orig_price_val.get("amount") or orig_price_val.get("full")
+        # Sale & original recommended price
+        is_on_sale = bool(item.get("isSale"))
+        rec_obj = item.get("recommendedPrice") or item.get("recommendedSellPrice")
+        if isinstance(rec_obj, dict):
+            rec_val = rec_obj.get("price") or rec_obj.get("amount")
         else:
-            orig_raw = orig_price_val
-        original_price = Decimal(str(orig_raw)) if orig_raw else None
-        is_on_sale = bool(original_price and original_price > price)
+            rec_val = rec_obj
+        original_price = (
+            Decimal(str(rec_val))
+            if (rec_val is not None and float(rec_val) > float(price))
+            else None
+        )
 
-        # Unit mapping
-        unit_raw = str(item.get("unit") or item.get("unitName") or "").lower()
+        # Unit mapping & price per unit
+        unit_raw = str(item.get("unit") or "").lower()
         unit_type = self._normalize_unit(unit_raw)
 
-        # Unit price
-        unit_price_raw = item.get("unitPrice") or item.get("pricePerUnit")
-        unit_price = Decimal(str(unit_price_raw)) if unit_price_raw else None
+        unit_price_obj = item.get("pricePerUnit")
+        unit_price_val = None
+        if isinstance(unit_price_obj, dict):
+            unit_price_val = unit_price_obj.get("price") or unit_price_obj.get("amount")
+            unit_name = unit_price_obj.get("unit")
+            if unit_name:
+                unit_type = self._normalize_unit(str(unit_name))
+        elif unit_price_obj is not None:
+            unit_price_val = unit_price_obj
 
-        # Package quantity
-        package_amount_raw = item.get("packageAmount") or item.get("weight") or item.get("volume")
-        package_amount = Decimal(str(package_amount_raw)) if package_amount_raw else None
+        unit_price = Decimal(str(unit_price_val)) if unit_price_val is not None else None
 
         # Links and media
-        url_path = item.get("url") or item.get("slug") or product_id
-        full_url = f"https://www.kosik.cz/{url_path.lstrip('/')}"
-        image_url = item.get("image") or item.get("imageUrl") or item.get("mainImage")
+        url_path = item.get("url") or ""
+        full_url = f"https://www.kosik.cz{url_path}" if url_path.startswith("/") else f"https://www.kosik.cz/{url_path}"
+
+        img_raw = item.get("image") or item.get("imageUrl")
+        if isinstance(img_raw, dict):
+            img_raw = img_raw.get("url") or img_raw.get("main")
+        if img_raw and isinstance(img_raw, str):
+            image_url = img_raw.replace("WIDTHxHEIGHT", "200x200")
+        else:
+            image_url = None
 
         return StoreProduct(
             store=StoreType.KOSIK,
             product_id=product_id,
             name=name.strip(),
-            brand=item.get("brand"),
+            brand=brand,
             price=price,
             original_price=original_price,
             is_on_sale=is_on_sale,
             unit_type=unit_type,
             unit_price=unit_price,
-            package_amount=package_amount,
-            in_stock=item.get("inStock", True),
+            package_amount=None,
+            in_stock=bool(item.get("plannedStock", True) or not item.get("availability") == "sold_out"),
             url=full_url,
             image_url=image_url,
         )

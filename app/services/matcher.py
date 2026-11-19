@@ -70,11 +70,58 @@ class ProductMatchingService:
                     best_r = r_prod
                     best_k = k_prod
 
-        # Default fallback to top 1 if score below threshold but both exists
-        if best_r is None or best_k is None or best_score < self.min_similarity_threshold:
-            best_r = rohlik_candidates[0]
-            best_k = kosik_candidates[0]
-            best_score = max(0.4, self.compute_similarity(best_r.name, best_k.name))
+        # If best pair is below threshold, check if candidates match the query itself
+        if best_score < self.min_similarity_threshold:
+            query_keywords = [w for w in re.sub(r"[^\w\s]", "", query_cs.lower()).split() if len(w) > 2]
+
+            r_matches = [
+                p for p in rohlik_candidates
+                if any(kw in p.name.lower() for kw in query_keywords)
+            ]
+            k_matches = [
+                p for p in kosik_candidates
+                if any(kw in p.name.lower() for kw in query_keywords)
+            ]
+
+            if r_matches and not k_matches:
+                # Only Rohlik truly has the requested item
+                return MatchedProductPair(
+                    query=query,
+                    query_cs=query_cs,
+                    rohlik_product=r_matches[0],
+                    kosik_product=None,
+                    advantage=PriceAdvantage.ROHLIK_CHEAPER,
+                    cheaper_store=StoreType.ROHLIK,
+                    price_difference=Decimal("0.00"),
+                    percentage_savings=Decimal("0.0"),
+                    match_confidence=1.0,
+                )
+            elif k_matches and not r_matches:
+                # Only Kosik truly has the requested item
+                return MatchedProductPair(
+                    query=query,
+                    query_cs=query_cs,
+                    rohlik_product=None,
+                    kosik_product=k_matches[0],
+                    advantage=PriceAdvantage.KOSIK_CHEAPER,
+                    cheaper_store=StoreType.KOSIK,
+                    price_difference=Decimal("0.00"),
+                    percentage_savings=Decimal("0.0"),
+                    match_confidence=1.0,
+                )
+            elif r_matches and k_matches:
+                # Both have items matching the query keywords, pair top matches
+                best_r = r_matches[0]
+                best_k = k_matches[0]
+                best_score = max(0.5, self.compute_similarity(best_r.name, best_k.name))
+            else:
+                # Neither candidate title contains the query keywords
+                best_r = rohlik_candidates[0]
+                best_k = kosik_candidates[0]
+                best_score = self.compute_similarity(best_r.name, best_k.name)
+
+        if best_r is None or best_k is None:
+            return None
 
         return self.compare_products(query, query_cs, best_r, best_k, best_score)
 

@@ -44,6 +44,7 @@ warn_return_any = true
 [tool.pytest.ini_options]
 minversion = "8.0"
 addopts = "-ra -q --asyncio-mode=auto"
+pythonpath = ["."]
 testpaths = [
     "tests",
 ]

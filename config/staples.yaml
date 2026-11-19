@@ -5,8 +5,8 @@ staples:
     category: "dairy"
     default_unit: "l"
     expected_amount: 1.0
-    rohlik_query: "plnotučné mléko 1l"
-    kosik_query: "plnotučné mléko 1l"
+    rohlik_query: "plnotučné mléko"
+    kosik_query: "plnotučné mléko"
     keywords: ["milk", "whole milk", "mléko", "plnotučné mléko"]
 
   - id: "butter_250g"
@@ -15,8 +15,8 @@ staples:
     category: "dairy"
     default_unit: "g"
     expected_amount: 250.0
-    rohlik_query: "máslo 250g"
-    kosik_query: "máslo 250g"
+    rohlik_query: "máslo"
+    kosik_query: "máslo"
     keywords: ["butter", "máslo", "jihočeské máslo"]
 
   - id: "eggs_m_10"
@@ -25,8 +25,8 @@ staples:
     category: "dairy_eggs"
     default_unit: "pcs"
     expected_amount: 10.0
-    rohlik_query: "vejce M 10 ks"
-    kosik_query: "vejce M 10 ks"
+    rohlik_query: "vejce"
+    kosik_query: "vejce"
     keywords: ["eggs", "vejce", "vajíčka"]
 
   - id: "bananas_1kg"
@@ -45,6 +45,6 @@ staples:
     category: "beverages"
     default_unit: "l"
     expected_amount: 0.5
-    rohlik_query: "pilsner urquell 0.5l"
-    kosik_query: "pilsner urquell 0.5l"
+    rohlik_query: "pilsner urquell"
+    kosik_query: "pilsner urquell"
     keywords: ["pilsner", "pilsner urquell", "plzeň", "pivo", "beer"]

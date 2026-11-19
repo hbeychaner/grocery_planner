@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 class RohlikStoreClient(BaseStoreClient):
-    """Client for Rohlík.cz grocery service."""
+    """Client for Rohlík.cz grocery service using verified live search-metadata endpoint."""
 
     def __init__(
         self,
@@ -51,11 +51,12 @@ class RohlikStoreClient(BaseStoreClient):
     async def search(self, query: str, limit: int = 5) -> List[StoreProduct]:
         """Search products on Rohlik."""
         client = await self._get_client()
-        url = "/services/frontend-service/products/search"
+        url = "/services/frontend-service/search-metadata"
         params = {
             "search": query,
             "offset": 0,
             "limit": limit,
+            "companyId": 1,
         }
 
         try:
@@ -68,8 +69,6 @@ class RohlikStoreClient(BaseStoreClient):
 
             data = response.json()
             raw_products = data.get("data", {}).get("productList", [])
-            if not raw_products and isinstance(data.get("productList"), list):
-                raw_products = data.get("productList", [])
 
             products: List[StoreProduct] = []
             for item in raw_products[:limit]:
@@ -106,8 +105,8 @@ class RohlikStoreClient(BaseStoreClient):
         """Check if Rohlik endpoint responds."""
         try:
             client = await self._get_client()
-            resp = await client.get("/services/frontend-service/products/search?search=test&limit=1")
-            return resp.status_code in (200, 404)
+            resp = await client.get("/services/frontend-service/search-metadata?search=test&limit=1&companyId=1")
+            return resp.status_code == 200
         except Exception:
             return False
 
@@ -118,8 +117,8 @@ class RohlikStoreClient(BaseStoreClient):
 
     def _parse_product(self, item: Dict[str, Any]) -> Optional[StoreProduct]:
         """Transform Rohlik JSON item into StoreProduct model."""
-        product_id = str(item.get("id") or item.get("productId") or "")
-        name = item.get("name") or item.get("productName")
+        product_id = str(item.get("productId") or item.get("id") or "")
+        name = item.get("productName") or item.get("name") or item.get("title")
         if not product_id or not name:
             return None
 
@@ -128,34 +127,38 @@ class RohlikStoreClient(BaseStoreClient):
         if isinstance(price_obj, dict):
             current_price_raw = price_obj.get("full") or price_obj.get("amount") or 0.0
         else:
-            current_price_raw = price_obj
+            current_price_raw = price_obj or 0.0
 
         price = Decimal(str(current_price_raw))
 
         # Sale / regular price
-        original_price_raw = item.get("originalPrice") or price_obj.get("originalPrice")
-        original_price = Decimal(str(original_price_raw)) if original_price_raw else None
+        orig_obj = item.get("originalPrice")
+        orig_raw = orig_obj.get("full") if isinstance(orig_obj, dict) else orig_obj
+        original_price = Decimal(str(orig_raw)) if (orig_raw and float(orig_raw) > float(price)) else None
         is_on_sale = bool(original_price and original_price > price)
 
-        # Unit type & normalization
-        unit_raw = (item.get("unit") or item.get("textualAmount") or "").lower()
+        # Unit type & textual amount
+        textual_amount = item.get("textualAmount") or ""
+        unit_raw = (item.get("unit") or textual_amount or "").lower()
         unit_type = self._normalize_unit(unit_raw)
 
-        # Price per base unit
-        unit_price_raw = item.get("pricePerUnit") or item.get("unitPrice")
+        # Unit price
+        unit_price_obj = item.get("pricePerUnit")
+        unit_price_raw = unit_price_obj.get("full") if isinstance(unit_price_obj, dict) else unit_price_obj
         unit_price = Decimal(str(unit_price_raw)) if unit_price_raw else None
 
-        # Package size / weight
-        package_amount_raw = item.get("packageAmount") or item.get("amount")
-        package_amount = Decimal(str(package_amount_raw)) if package_amount_raw else None
-
         # Direct link
-        slug = item.get("slug") or product_id
-        url = f"https://www.rohlik.cz/{slug}"
+        link_path = item.get("link") or ""
+        url = f"https://www.rohlik.cz{link_path}" if link_path.startswith("/") else f"https://www.rohlik.cz/{link_path}"
 
         # Image
-        images = item.get("images") or []
-        image_url = images[0] if (isinstance(images, list) and images) else item.get("image")
+        img_path = item.get("imgPath") or ""
+        if img_path.startswith("http"):
+            image_url = img_path
+        elif img_path:
+            image_url = f"https://cdn.rohlik.cz{img_path}"
+        else:
+            image_url = None
 
         return StoreProduct(
             store=StoreType.ROHLIK,
@@ -167,7 +170,7 @@ class RohlikStoreClient(BaseStoreClient):
             is_on_sale=is_on_sale,
             unit_type=unit_type,
             unit_price=unit_price,
-            package_amount=package_amount,
+            package_amount=None,
             in_stock=item.get("inStock", True),
             url=url,
             image_url=image_url,
