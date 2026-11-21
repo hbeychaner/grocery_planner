@@ -34,7 +34,7 @@ class AppSettings(BaseSettings):
     # Local Ollama LLM Configuration (Optional)
     ollama_enabled: bool = Field(default=True, alias="OLLAMA_ENABLED")
     ollama_base_url: str = Field(default="http://localhost:11434", alias="OLLAMA_BASE_URL")
-    ollama_model: str = Field(default="qwen2.5-coder:latest", alias="OLLAMA_MODEL")
+    ollama_model: str = Field(default="qwen3.5:latest", alias="OLLAMA_MODEL")
     ollama_timeout_seconds: float = Field(default=15.0, alias="OLLAMA_TIMEOUT_SECONDS")
 
     # File paths
