@@ -81,20 +81,34 @@ class PriceComparisonService:
         clean_query = query.strip()
         staple = self._staples.get(clean_query.lower())
         category: Optional[str] = None
-        labels: List[str] = []
+        labels_by_language: Dict[str, List[str]] = {}
+        translations: Dict[str, str] = {}
+        source_language: Optional[str] = None
 
         if staple:
             rohlik_term = staple.rohlik_query
             kosik_term = staple.kosik_query
             translated_term = staple.name_cs
             category = staple.category
-            labels = staple.keywords
+            translations = {"en": staple.name_en, "cs": staple.name_cs}
+            labels_by_language = staple.labels or {"en": staple.keywords}
+            source_language = "en"
         else:
-            translated_term, _, category, labels = await self.bilingual.translate_to_czech_async(
-                clean_query, self.ollama
+            t_res = await self.bilingual.translate_query_async(
+                clean_query, ollama_service=self.ollama
             )
+            translated_term = t_res.primary_term
             rohlik_term = translated_term
             kosik_term = translated_term
+            category = t_res.category
+            translations = t_res.translations
+            labels_by_language = t_res.labels
+            source_language = t_res.source_language
+
+        flat_labels = labels_by_language.get(
+            settings.default_language,
+            labels_by_language.get("en", labels_by_language.get("cs", [])),
+        )
 
         # Fetch more candidates so we can rank by unit price
         rohlik_task = self.rohlik.search(rohlik_term, limit=10)
@@ -123,8 +137,7 @@ class PriceComparisonService:
         kosik_ranked = self.matcher.rank_by_unit_price(k_filtered)
 
         if not best_pair:
-            voice_en = self.formatter.format_single_item_en(None, clean_query)
-            voice_cs = self.formatter.format_single_item_cs(None, clean_query)
+            voice_summaries = self.formatter.format_by_language(None, translations, clean_query)
             return ComparisonResponse(
                 query=clean_query,
                 query_translated=translated_term,
@@ -132,8 +145,8 @@ class PriceComparisonService:
                 cheapest_store=None,
                 price_difference=Decimal("0.00"),
                 percentage_savings=Decimal("0.0"),
-                voice_summary_en=voice_en,
-                voice_summary_cs=voice_cs,
+                voice_summary_en=voice_summaries["en"],
+                voice_summary_cs=voice_summaries["cs"],
                 primary_pair=None,
                 all_pairs=[],
                 rohlik_candidates=r_list,
@@ -141,11 +154,14 @@ class PriceComparisonService:
                 rohlik_ranked=rohlik_ranked,
                 kosik_ranked=kosik_ranked,
                 category=category,
-                labels=labels,
+                labels=flat_labels,
+                source_language=source_language,
+                translations=translations,
+                labels_by_language=labels_by_language,
+                voice_summaries=voice_summaries,
             )
 
-        voice_en = self.formatter.format_single_item_en(best_pair, clean_query)
-        voice_cs = self.formatter.format_single_item_cs(best_pair, clean_query)
+        voice_summaries = self.formatter.format_by_language(best_pair, translations, clean_query)
 
         return ComparisonResponse(
             query=clean_query,
@@ -154,8 +170,8 @@ class PriceComparisonService:
             cheapest_store=best_pair.cheaper_store,
             price_difference=best_pair.price_difference,
             percentage_savings=best_pair.percentage_savings,
-            voice_summary_en=voice_en,
-            voice_summary_cs=voice_cs,
+            voice_summary_en=voice_summaries["en"],
+            voice_summary_cs=voice_summaries["cs"],
             primary_pair=best_pair,
             all_pairs=[best_pair],
             rohlik_candidates=r_list,
@@ -163,7 +179,11 @@ class PriceComparisonService:
             rohlik_ranked=rohlik_ranked,
             kosik_ranked=kosik_ranked,
             category=category,
-            labels=labels,
+            labels=flat_labels,
+            source_language=source_language,
+            translations=translations,
+            labels_by_language=labels_by_language,
+            voice_summaries=voice_summaries,
         )
 
     async def compare_basket(self, items: List[BasketComparisonItem]) -> BasketComparisonResponse:

@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -9,11 +9,13 @@ class StapleDefinition(BaseModel):
     name_en: str = Field(..., description="English title")
     name_cs: str = Field(..., description="Czech title")
     category: str = Field(default="general", description="Grocery category")
-    default_unit: str = Field(default="pcs", description="Expected unit (kg, g, l, pcs)")
-    expected_amount: Optional[float] = Field(default=None, description="Expected pack size")
     rohlik_query: str = Field(..., description="Target search query for Rohlik")
     kosik_query: str = Field(..., description="Target search query for Kosik")
-    keywords: List[str] = Field(default_factory=list, description="Associated synonyms for matching")
+    keywords: List[str] = Field(default_factory=list, description="Associated lookup keywords")
+    labels: Dict[str, List[str]] = Field(
+        default_factory=dict,
+        description="Language-keyed descriptive labels (e.g. {'en': [...], 'cs': [...]})",
+    )
 
 
 class StaplesCatalog(BaseModel):

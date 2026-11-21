@@ -41,3 +41,6 @@ dmypy.json
 # Docker
 *.log
 docker-compose.override.yml
+
+# Local SQLite database
+data/

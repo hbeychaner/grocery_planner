@@ -1,5 +1,5 @@
 from decimal import Decimal
-from typing import List, Optional
+from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
 from app.models.enums import PriceAdvantage, StoreType
 from app.models.product import StoreProduct
@@ -37,7 +37,20 @@ class ComparisonResponse(BaseModel):
     rohlik_ranked: List[StoreProduct] = Field(default_factory=list, description="Rohlik products ranked by unit price ascending")
     kosik_ranked: List[StoreProduct] = Field(default_factory=list, description="Kosik products ranked by unit price ascending")
     category: Optional[str] = Field(default=None, description="Food category classified by Ollama/NLP")
-    labels: List[str] = Field(default_factory=list, description="Descriptive food labels (organic, dairy_free, etc.)")
+    labels: List[str] = Field(default_factory=list, description="Descriptive food labels for primary display")
+    source_language: Optional[str] = Field(default=None, description="Detected ISO 639-1 source language code")
+    translations: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Language-keyed search terms (e.g. {'en': 'butter', 'cs': 'máslo'})",
+    )
+    labels_by_language: Dict[str, List[str]] = Field(
+        default_factory=dict,
+        description="Language-keyed descriptive labels (e.g. {'en': [...], 'cs': [...]})",
+    )
+    voice_summaries: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Language-keyed voice-optimized summaries",
+    )
 
 
 class BasketComparisonItem(BaseModel):

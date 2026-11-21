@@ -1,50 +1,55 @@
 staples:
-  - id: "whole_milk_1l"
-    name_en: "Whole Milk 1L"
-    name_cs: "Plnotučné mléko 1L"
+  - id: "whole_milk"
+    name_en: "Whole Milk"
+    name_cs: "Plnotučné mléko"
     category: "dairy"
-    default_unit: "l"
-    expected_amount: 1.0
     rohlik_query: "plnotučné mléko"
     kosik_query: "plnotučné mléko"
     keywords: ["milk", "whole milk", "mléko", "plnotučné mléko"]
+    labels:
+      en: ["milk", "whole milk", "dairy"]
+      cs: ["mléko", "plnotučné mléko", "mléčné výrobky"]
 
-  - id: "butter_250g"
-    name_en: "Butter 250g"
-    name_cs: "Máslo 250g"
+  - id: "butter"
+    name_en: "Butter"
+    name_cs: "Máslo"
     category: "dairy"
-    default_unit: "g"
-    expected_amount: 250.0
     rohlik_query: "máslo"
     kosik_query: "máslo"
     keywords: ["butter", "máslo", "jihočeské máslo"]
+    labels:
+      en: ["butter", "dairy"]
+      cs: ["máslo", "jihočeské máslo", "mléčné výrobky"]
 
-  - id: "eggs_m_10"
-    name_en: "Eggs M (10 pcs)"
-    name_cs: "Vejce M (10 ks)"
+  - id: "eggs"
+    name_en: "Eggs"
+    name_cs: "Vejce"
     category: "dairy_eggs"
-    default_unit: "pcs"
-    expected_amount: 10.0
     rohlik_query: "vejce"
     kosik_query: "vejce"
     keywords: ["eggs", "vejce", "vajíčka"]
+    labels:
+      en: ["eggs", "poultry"]
+      cs: ["vejce", "vajíčka"]
 
-  - id: "bananas_1kg"
-    name_en: "Bananas 1kg"
-    name_cs: "Banány 1kg"
+  - id: "bananas"
+    name_en: "Bananas"
+    name_cs: "Banány"
     category: "produce"
-    default_unit: "kg"
-    expected_amount: 1.0
     rohlik_query: "banány"
     kosik_query: "banány"
     keywords: ["banana", "bananas", "banány"]
+    labels:
+      en: ["banana", "bananas", "fruit"]
+      cs: ["banán", "banány", "ovoce"]
 
-  - id: "pilsner_urquell_05l"
-    name_en: "Pilsner Urquell 0.5L"
-    name_cs: "Pilsner Urquell 0.5L"
+  - id: "pilsner_urquell"
+    name_en: "Pilsner Urquell"
+    name_cs: "Pilsner Urquell"
     category: "beverages"
-    default_unit: "l"
-    expected_amount: 0.5
     rohlik_query: "pilsner urquell"
     kosik_query: "pilsner urquell"
     keywords: ["pilsner", "pilsner urquell", "plzeň", "pivo", "beer"]
+    labels:
+      en: ["beer", "pilsner", "lager"]
+      cs: ["pivo", "plzeň", "ležák"]

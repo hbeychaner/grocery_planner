@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -35,11 +35,26 @@ class AppSettings(BaseSettings):
     ollama_enabled: bool = Field(default=True, alias="OLLAMA_ENABLED")
     ollama_base_url: str = Field(default="http://localhost:11434", alias="OLLAMA_BASE_URL")
     ollama_model: str = Field(default="qwen3.5:latest", alias="OLLAMA_MODEL")
-    ollama_timeout_seconds: float = Field(default=15.0, alias="OLLAMA_TIMEOUT_SECONDS")
+    ollama_timeout_seconds: float = Field(default=30.0, alias="OLLAMA_TIMEOUT_SECONDS")
+    ollama_think: bool = Field(default=False, alias="OLLAMA_THINK")
+
+    # Language & Translation Cache Configuration
+    default_catalog_language: str = Field(default="cs", alias="DEFAULT_CATALOG_LANGUAGE")
+    supported_languages: List[str] = Field(default=["en", "cs"], alias="SUPPORTED_LANGUAGES")
+
+    # Langfuse Monitoring Configuration (Optional)
+    langfuse_enabled: bool = Field(default=False, alias="LANGFUSE_ENABLED")
+    langfuse_public_key: Optional[str] = Field(default=None, alias="LANGFUSE_PUBLIC_KEY")
+    langfuse_secret_key: Optional[str] = Field(default=None, alias="LANGFUSE_SECRET_KEY")
+    langfuse_host: str = Field(default="https://cloud.langfuse.com", alias="LANGFUSE_HOST")
 
     # File paths
     base_dir: Path = Path(__file__).resolve().parent.parent.parent
     staples_config_path: Path = base_dir / "config" / "staples.yaml"
+    translation_db_path: Path = Field(
+        default=base_dir / "data" / "translations.db",
+        alias="TRANSLATION_DB_PATH",
+    )
 
 
 settings = AppSettings()

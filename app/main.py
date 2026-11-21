@@ -5,22 +5,32 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api.deps import get_kosik_client, get_ollama_service, get_rohlik_client
+from app.api.deps import (
+    get_kosik_client,
+    get_monitoring_service,
+    get_ollama_service,
+    get_rohlik_client,
+    get_translation_cache,
+)
 from app.api.v1.router import api_v1_router
 from app.core.config import settings
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Application lifespan manager for connection pools."""
+    """Application lifespan manager for connection pools and monitoring."""
     yield
     # Cleanup clients on shutdown
     rohlik = get_rohlik_client()
     kosik = get_kosik_client()
     ollama = get_ollama_service()
+    monitoring = get_monitoring_service()
+    cache = get_translation_cache()
     await rohlik.close()
     await kosik.close()
     await ollama.close()
+    cache.close()
+    monitoring.shutdown()
 
 
 app = FastAPI(

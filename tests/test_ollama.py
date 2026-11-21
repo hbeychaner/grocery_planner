@@ -23,10 +23,21 @@ async def test_ollama_health_check_disabled() -> None:
 
 
 @pytest.mark.asyncio
-async def test_ollama_analyze_query() -> None:
-    service = OllamaService(enabled=True)
+async def test_ollama_analyze_query_enforces_language_metadata_and_disables_thinking() -> None:
+    service = OllamaService(enabled=True, think=False)
     mock_payload = {
-        "response": '{"query_cs": "kváskový chléb", "category": "bakery", "labels": ["organic", "sourdough"], "synonyms": ["kváskový chleba"]}'
+        "response": (
+            '```json\n'
+            '{"source_language": "en", '
+            '"translations": {"en": "sourdough bread", "cs": "kváskový chléb"}, '
+            '"category": "bakery", '
+            '"labels": {"en": ["sourdough", "artisan"], "cs": ["kváskový", "řemeslný"]}, '
+            '"synonyms": {"en": ["artisan bread"], "cs": ["kváskový chleba"]}, '
+            '"is_compound": true}\n'
+            '```'
+        ),
+        "prompt_eval_count": 42,
+        "eval_count": 28,
     }
 
     with patch.object(service, "_get_client") as mock_get_client:
@@ -37,14 +48,23 @@ async def test_ollama_analyze_query() -> None:
         analysis = await service.analyze_query("organic sourdough bread")
         assert analysis is not None
         assert isinstance(analysis, OllamaQueryAnalysis)
+        assert analysis.source_language == "en"
         assert analysis.query_cs == "kváskový chléb"
+        assert analysis.get_translation("en") == "sourdough bread"
         assert analysis.category == "bakery"
-        assert "sourdough" in analysis.labels
+        assert analysis.labels["en"] == ["sourdough", "artisan"]
+        assert analysis.labels["cs"] == ["kváskový", "řemeslný"]
+        assert analysis.is_compound is True
+
+        # Verify think=False was sent in payload and format=json was omitted
+        sent_json = mock_client.post.call_args.kwargs["json"]
+        assert sent_json["think"] is False
+        assert "format" not in sent_json
 
 
 @pytest.mark.asyncio
 async def test_ollama_filter_relevant_indices() -> None:
-    service = OllamaService(enabled=True)
+    service = OllamaService(enabled=True, think=False)
     mock_payload = {"response": '{"relevant_indices": [0, 1]}'}
 
     with patch.object(service, "_get_client") as mock_get_client:

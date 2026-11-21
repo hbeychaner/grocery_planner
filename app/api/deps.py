@@ -1,22 +1,24 @@
-from typing import Generator
-from fastapi import Request
 from app.clients.base import BaseStoreClient
 from app.clients.rohlik import RohlikStoreClient
 from app.clients.kosik import KosikStoreClient
 from app.services.bilingual import BilingualQueryService
 from app.services.comparator import PriceComparisonService
 from app.services.matcher import ProductMatchingService
+from app.services.monitoring import MonitoringService
 from app.services.ollama import OllamaService
+from app.services.translation_cache import TranslationCacheService
 from app.services.voice_formatter import VoiceResponseFormatter
 
 
-# Singleton store clients for lifetime of app
+# Singleton services for lifetime of app
 _rohlik_client = RohlikStoreClient()
 _kosik_client = KosikStoreClient()
-_bilingual_service = BilingualQueryService()
+_monitoring_service = MonitoringService()
+_translation_cache = TranslationCacheService()
+_bilingual_service = BilingualQueryService(cache_service=_translation_cache)
 _matcher_service = ProductMatchingService()
 _voice_formatter = VoiceResponseFormatter()
-_ollama_service = OllamaService()
+_ollama_service = OllamaService(monitoring=_monitoring_service)
 _comparator_service = PriceComparisonService(
     rohlik_client=_rohlik_client,
     kosik_client=_kosik_client,
@@ -35,6 +37,16 @@ def get_comparison_service() -> PriceComparisonService:
 def get_ollama_service() -> OllamaService:
     """Dependency provider for OllamaService."""
     return _ollama_service
+
+
+def get_monitoring_service() -> MonitoringService:
+    """Dependency provider for MonitoringService."""
+    return _monitoring_service
+
+
+def get_translation_cache() -> TranslationCacheService:
+    """Dependency provider for TranslationCacheService."""
+    return _translation_cache
 
 
 def get_rohlik_client() -> BaseStoreClient:
