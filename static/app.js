@@ -47,18 +47,21 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Winner banner (only display when there is a distinct price advantage)
     winnerBanner.className = "winner-banner";
-    const unit = (data.primary_pair && data.primary_pair.rohlik_product && data.primary_pair.rohlik_product.unit_type)
+    const rawUnit = (data.primary_pair && data.primary_pair.rohlik_product && data.primary_pair.rohlik_product.unit_type)
       || (data.primary_pair && data.primary_pair.kosik_product && data.primary_pair.kosik_product.unit_type)
-      || "kg";
+      || (data.rohlik_ranked && data.rohlik_ranked[0] && data.rohlik_ranked[0].unit_type)
+      || (data.kosik_ranked && data.kosik_ranked[0] && data.kosik_ranked[0].unit_type)
+      || "unit";
+    const unitLabel = rawUnit === "pcs" ? "piece" : rawUnit;
 
     if (data.advantage === "rohlik_cheaper" && data.price_difference && parseFloat(data.price_difference) > 0) {
       winnerBanner.classList.remove("hidden");
       winnerBanner.classList.add("rohlik");
-      winnerBanner.innerHTML = `🏆 <strong>Rohlík is cheaper!</strong> Save ${data.price_difference} CZK/${unit} (${data.percentage_savings}%) on unit price.`;
+      winnerBanner.innerHTML = `🏆 <strong>Rohlík is cheaper!</strong> Save ${data.price_difference} CZK per ${unitLabel} (${data.percentage_savings}%).`;
     } else if (data.advantage === "kosik_cheaper" && data.price_difference && parseFloat(data.price_difference) > 0) {
       winnerBanner.classList.remove("hidden");
       winnerBanner.classList.add("kosik");
-      winnerBanner.innerHTML = `🏆 <strong>Košík is cheaper!</strong> Save ${data.price_difference} CZK/${unit} (${data.percentage_savings}%) on unit price.`;
+      winnerBanner.innerHTML = `🏆 <strong>Košík is cheaper!</strong> Save ${data.price_difference} CZK per ${unitLabel} (${data.percentage_savings}%).`;
     } else {
       // Hide banner on ties or when neither store has a clear advantage
       winnerBanner.classList.add("hidden");
@@ -100,8 +103,9 @@ document.addEventListener("DOMContentLoaded", () => {
   function renderProductCard(product, storeName, isBest, rank) {
     const hasSale = product.is_on_sale && product.original_price;
     const salePill = hasSale ? `<span class="sale-pill">SALE</span>` : "";
+    const bestUnit = product.unit_type === "pcs" ? "piece" : (product.unit_type || "unit");
     const bestPill = isBest
-      ? `<span class="best-value-pill">🏅 Best Value/kg</span>`
+      ? `<span class="best-value-pill">🏅 Best Value / ${bestUnit}</span>`
       : "";
     const unitPriceText = product.unit_price
       ? `<span class="unit-price">${Number(product.unit_price).toFixed(2)} CZK / ${product.unit_type}</span>`
