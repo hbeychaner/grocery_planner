@@ -6,6 +6,7 @@ from app.clients.kosik import KosikStoreClient
 from app.services.bilingual import BilingualQueryService
 from app.services.comparator import PriceComparisonService
 from app.services.matcher import ProductMatchingService
+from app.services.ollama import OllamaService
 from app.services.voice_formatter import VoiceResponseFormatter
 
 
@@ -15,18 +16,25 @@ _kosik_client = KosikStoreClient()
 _bilingual_service = BilingualQueryService()
 _matcher_service = ProductMatchingService()
 _voice_formatter = VoiceResponseFormatter()
+_ollama_service = OllamaService()
 _comparator_service = PriceComparisonService(
     rohlik_client=_rohlik_client,
     kosik_client=_kosik_client,
     bilingual_service=_bilingual_service,
     matching_service=_matcher_service,
     voice_formatter=_voice_formatter,
+    ollama_service=_ollama_service,
 )
 
 
 def get_comparison_service() -> PriceComparisonService:
     """Dependency provider for PriceComparisonService."""
     return _comparator_service
+
+
+def get_ollama_service() -> OllamaService:
+    """Dependency provider for OllamaService."""
+    return _ollama_service
 
 
 def get_rohlik_client() -> BaseStoreClient:

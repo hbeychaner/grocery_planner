@@ -18,6 +18,7 @@ from app.models.comparison import (
 from app.models.staples import StapleDefinition, StaplesCatalog
 from app.services.bilingual import BilingualQueryService
 from app.services.matcher import ProductMatchingService
+from app.services.ollama import OllamaService
 from app.services.voice_formatter import VoiceResponseFormatter
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,7 @@ class PriceComparisonService:
         bilingual_service: Optional[BilingualQueryService] = None,
         matching_service: Optional[ProductMatchingService] = None,
         voice_formatter: Optional[VoiceResponseFormatter] = None,
+        ollama_service: Optional[OllamaService] = None,
         staples_path: Optional[Path] = None,
     ) -> None:
         self.rohlik = rohlik_client
@@ -42,6 +44,7 @@ class PriceComparisonService:
             min_similarity_threshold=settings.min_match_similarity_score
         )
         self.formatter = voice_formatter or VoiceResponseFormatter()
+        self.ollama = ollama_service or OllamaService()
         self.staples_path = staples_path or settings.staples_config_path
         self._staples: Dict[str, StapleDefinition] = {}
         self._load_staples()
@@ -77,13 +80,19 @@ class PriceComparisonService:
         """Compare a single grocery item between Rohlik and Kosik."""
         clean_query = query.strip()
         staple = self._staples.get(clean_query.lower())
+        category: Optional[str] = None
+        labels: List[str] = []
 
         if staple:
             rohlik_term = staple.rohlik_query
             kosik_term = staple.kosik_query
             translated_term = staple.name_cs
+            category = staple.category
+            labels = staple.keywords
         else:
-            translated_term, _ = self.bilingual.translate_to_czech(clean_query)
+            translated_term, _, category, labels = await self.bilingual.translate_to_czech_async(
+                clean_query, self.ollama
+            )
             rohlik_term = translated_term
             kosik_term = translated_term
 
@@ -131,6 +140,8 @@ class PriceComparisonService:
                 kosik_candidates=k_list,
                 rohlik_ranked=rohlik_ranked,
                 kosik_ranked=kosik_ranked,
+                category=category,
+                labels=labels,
             )
 
         voice_en = self.formatter.format_single_item_en(best_pair, clean_query)
@@ -151,6 +162,8 @@ class PriceComparisonService:
             kosik_candidates=k_list,
             rohlik_ranked=rohlik_ranked,
             kosik_ranked=kosik_ranked,
+            category=category,
+            labels=labels,
         )
 
     async def compare_basket(self, items: List[BasketComparisonItem]) -> BasketComparisonResponse:

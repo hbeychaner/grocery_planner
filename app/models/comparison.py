@@ -36,6 +36,8 @@ class ComparisonResponse(BaseModel):
     kosik_candidates: List[StoreProduct] = Field(default_factory=list, description="Top Kosik search results")
     rohlik_ranked: List[StoreProduct] = Field(default_factory=list, description="Rohlik products ranked by unit price ascending")
     kosik_ranked: List[StoreProduct] = Field(default_factory=list, description="Kosik products ranked by unit price ascending")
+    category: Optional[str] = Field(default=None, description="Food category classified by Ollama/NLP")
+    labels: List[str] = Field(default_factory=list, description="Descriptive food labels (organic, dairy_free, etc.)")
 
 
 class BasketComparisonItem(BaseModel):

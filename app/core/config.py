@@ -31,6 +31,12 @@ class AppSettings(BaseSettings):
     cache_ttl_seconds: int = Field(default=300, alias="CACHE_TTL_SECONDS")
     min_match_similarity_score: float = Field(default=0.55, alias="MIN_MATCH_SIMILARITY_SCORE")
 
+    # Local Ollama LLM Configuration (Optional)
+    ollama_enabled: bool = Field(default=True, alias="OLLAMA_ENABLED")
+    ollama_base_url: str = Field(default="http://localhost:11434", alias="OLLAMA_BASE_URL")
+    ollama_model: str = Field(default="qwen2.5-coder:latest", alias="OLLAMA_MODEL")
+    ollama_timeout_seconds: float = Field(default=15.0, alias="OLLAMA_TIMEOUT_SECONDS")
+
     # File paths
     base_dir: Path = Path(__file__).resolve().parent.parent.parent
     staples_config_path: Path = base_dir / "config" / "staples.yaml"

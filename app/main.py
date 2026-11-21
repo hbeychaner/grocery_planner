@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api.deps import get_kosik_client, get_rohlik_client
+from app.api.deps import get_kosik_client, get_ollama_service, get_rohlik_client
 from app.api.v1.router import api_v1_router
 from app.core.config import settings
 
@@ -17,8 +17,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Cleanup clients on shutdown
     rohlik = get_rohlik_client()
     kosik = get_kosik_client()
+    ollama = get_ollama_service()
     await rohlik.close()
     await kosik.close()
+    await ollama.close()
 
 
 app = FastAPI(
@@ -46,17 +48,20 @@ async def serve_index() -> FileResponse:
 
 @app.get("/health", tags=["Health"])
 async def health_check() -> Dict[str, object]:
-    """Service health check verifying stores reachability."""
+    """Service health check verifying stores and optional Ollama reachability."""
     rohlik = get_rohlik_client()
     kosik = get_kosik_client()
+    ollama = get_ollama_service()
 
     rohlik_status = await rohlik.health_check()
     kosik_status = await kosik.health_check()
+    ollama_status = await ollama.health_check()
 
     return {
         "status": "healthy" if (rohlik_status or kosik_status) else "degraded",
         "rohlik_connected": rohlik_status,
         "kosik_connected": kosik_status,
+        "ollama_connected": ollama_status,
         "environment": settings.environment,
     }
 

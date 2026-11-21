@@ -132,6 +132,33 @@ class BilingualQueryService:
         # 4. Unknown query - pass as-is (e.g. brand name like 'Nutella' or 'Coca Cola')
         return raw, []
 
+    async def translate_to_czech_async(
+        self, query: str, ollama_service: Optional[Any] = None
+    ) -> Tuple[str, List[str], Optional[str], List[str]]:
+        """Translate search query to Czech, falling back to local Ollama LLM for unknown terms.
+        
+        Returns:
+            Tuple of (primary_czech_term, synonyms, category, labels)
+        """
+        # 1. Try deterministic dictionary lookup first
+        term, synonyms = self.translate_to_czech(query)
+        raw = query.strip().lower()
+
+        # If term was recognized by dictionary or is already Czech
+        if term != raw or self._strip_accents(re.sub(r"[^\w\s-]", "", raw)) in self.reverse_dict:
+            return term, synonyms, None, []
+
+        # 2. If unknown and Ollama is available, query Ollama for translation and classification
+        if ollama_service is not None and getattr(ollama_service, "enabled", False):
+            try:
+                analysis = await ollama_service.analyze_query(query)
+                if analysis and analysis.query_cs:
+                    return analysis.query_cs, analysis.synonyms, analysis.category, analysis.labels
+            except Exception:
+                pass
+
+        return term, synonyms, None, []
+
     @staticmethod
     def _strip_accents(text: str) -> str:
         """Remove diacritics for insensitive matching."""
