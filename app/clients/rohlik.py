@@ -181,12 +181,12 @@ class RohlikStoreClient(BaseStoreClient):
         unit_str = unit_str.strip().lower()
         if "kg" in unit_str or "kilo" in unit_str:
             return UnitType.KILOGRAM
+        if "ml" in unit_str:
+            return UnitType.MILLILITER
         if "g" in unit_str or "gram" in unit_str:
             return UnitType.GRAM
         if "l" in unit_str or "litr" in unit_str:
             return UnitType.LITER
-        if "ml" in unit_str:
-            return UnitType.MILLILITER
         if "ks" in unit_str or "kus" in unit_str or "pc" in unit_str:
             return UnitType.PIECE
         return UnitType.UNKNOWN

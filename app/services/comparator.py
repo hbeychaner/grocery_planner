@@ -100,13 +100,18 @@ class PriceComparisonService:
 
         best_pair = self.matcher.find_best_pair(clean_query, translated_term, r_list, k_list)
 
+        # Filter relevant products for clean ranked list display
+        r_filtered = self.matcher._filter_relevant_products(translated_term, r_list, clean_query)
+        k_filtered = self.matcher._filter_relevant_products(translated_term, k_list, clean_query)
+
+        # If filtering emptied both lists, fall back to raw lists
+        if not r_filtered and not k_filtered:
+            r_filtered = r_list
+            k_filtered = k_list
+
         # Build ranked lists (by unit price ascending) for UI display
-        rohlik_ranked = self.matcher.rank_by_unit_price(
-            self.matcher._filter_relevant_products(translated_term, r_list) or r_list
-        )
-        kosik_ranked = self.matcher.rank_by_unit_price(
-            self.matcher._filter_relevant_products(translated_term, k_list) or k_list
-        )
+        rohlik_ranked = self.matcher.rank_by_unit_price(r_filtered)
+        kosik_ranked = self.matcher.rank_by_unit_price(k_filtered)
 
         if not best_pair:
             voice_en = self.formatter.format_single_item_en(None, clean_query)

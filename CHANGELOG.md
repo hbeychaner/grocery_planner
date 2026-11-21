@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-11-21
+
+### Fixed
+- **Brand Match Confidence Clamping**: Clamped `match_confidence` in `ProductMatchingService` to `[0.0, 1.0]`, fixing HTTP 500 Pydantic validation errors on brand queries like Pilsner Urquell.
+- **Unit Normalization Precedence**: Fixed `_normalize_unit` in both store clients so `"ml"` is evaluated before `"l"` substring checks.
+- **Query Relevance Stemming & Out-of-Stock Handling**: Added stem-based relevance checks and category exclusions to prevent out-of-stock items on one supermarket from being falsely paired with unrelated search fallbacks (e.g. kiwi matched to bananas).
+- **Voice Response Enum Formatting**: Formatted unit types in voice responses to use their value strings (`kg`, `l`, `pcs`) instead of `UnitType.<NAME>`.
+- **Czech Voice Single-Store Handling**: Added single-store availability responses in Czech.
+
+### Added
+- **Store Client Test Suites**: Implemented `tests/test_rohlik_client.py` and `tests/test_kosik_client.py`, bringing test coverage to 20 passing unit tests.
+
 ## [0.2.0] - 2026-11-21
 
 ### Added

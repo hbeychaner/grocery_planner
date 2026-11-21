@@ -17,7 +17,8 @@ class VoiceResponseFormatter:
 
         if r_prod and not k_prod:
             sale_text = " (currently on sale)" if r_prod.is_on_sale else ""
-            unit_text = f" ({self._format_price(r_prod.unit_price)} per {r_prod.unit_type})" if r_prod.unit_price else ""
+            unit_str = r_prod.unit_type.value if hasattr(r_prod.unit_type, "value") else str(r_prod.unit_type)
+            unit_text = f" ({self._format_price(r_prod.unit_price)} per {unit_str})" if r_prod.unit_price else ""
             return (
                 f"{raw_query.capitalize()} is only available on Rohlik: {r_prod.name} for "
                 f"{self._format_price(r_prod.price)} CZK{unit_text}{sale_text}."
@@ -25,7 +26,8 @@ class VoiceResponseFormatter:
 
         if k_prod and not r_prod:
             sale_text = " (currently on sale)" if k_prod.is_on_sale else ""
-            unit_text = f" ({self._format_price(k_prod.unit_price)} per {k_prod.unit_type})" if k_prod.unit_price else ""
+            unit_str = k_prod.unit_type.value if hasattr(k_prod.unit_type, "value") else str(k_prod.unit_type)
+            unit_text = f" ({self._format_price(k_prod.unit_price)} per {unit_str})" if k_prod.unit_price else ""
             return (
                 f"{raw_query.capitalize()} is only available on Kosik: {k_prod.name} for "
                 f"{self._format_price(k_prod.price)} CZK{unit_text}{sale_text}."
@@ -35,7 +37,8 @@ class VoiceResponseFormatter:
             return f"I couldn't find price data for '{raw_query}'."
 
         if pair.advantage == PriceAdvantage.TIED:
-            unit_text = f" ({self._format_price(r_prod.unit_price)} per {r_prod.unit_type})" if r_prod.unit_price else ""
+            unit_str = r_prod.unit_type.value if hasattr(r_prod.unit_type, "value") else str(r_prod.unit_type)
+            unit_text = f" ({self._format_price(r_prod.unit_price)} per {unit_str})" if r_prod.unit_price else ""
             return (
                 f"Both stores offer the same price for {raw_query} at "
                 f"{self._format_price(r_prod.price)} CZK{unit_text}."
@@ -67,13 +70,33 @@ class VoiceResponseFormatter:
 
     def format_single_item_cs(self, pair: Optional[MatchedProductPair], raw_query: str) -> str:
         """Create conversational Czech voice response."""
-        if not pair or not pair.rohlik_product or not pair.kosik_product:
+        if not pair:
+            return f"Bohužel jsem nenašel kompletní porovnání pro '{raw_query}'."
+
+        r_prod = pair.rohlik_product
+        k_prod = pair.kosik_product
+
+        if r_prod and not k_prod:
+            unit_text = f" ({self._format_price(r_prod.unit_price)} Kč za {r_prod.unit_type.value})" if r_prod.unit_price else ""
+            return (
+                f"{raw_query.capitalize()} je k dispozici pouze na Rohlíku: {r_prod.name} za "
+                f"{self._format_price(r_prod.price)} Kč{unit_text}."
+            )
+
+        if k_prod and not r_prod:
+            unit_text = f" ({self._format_price(k_prod.unit_price)} Kč za {k_prod.unit_type.value})" if k_prod.unit_price else ""
+            return (
+                f"{raw_query.capitalize()} je k dispozici pouze na Košíku: {k_prod.name} za "
+                f"{self._format_price(k_prod.price)} Kč{unit_text}."
+            )
+
+        if not r_prod or not k_prod:
             return f"Bohužel jsem nenašel kompletní porovnání pro '{raw_query}'."
 
         winner = "Rohlík" if pair.cheaper_store == StoreType.ROHLIK else "Košík"
         loser = "Košíku" if pair.cheaper_store == StoreType.ROHLIK else "Rohlíku"
-        winner_prod = pair.rohlik_product if pair.cheaper_store == StoreType.ROHLIK else pair.kosik_product
-        loser_prod = pair.kosik_product if pair.cheaper_store == StoreType.ROHLIK else pair.rohlik_product
+        winner_prod = r_prod if pair.cheaper_store == StoreType.ROHLIK else k_prod
+        loser_prod = k_prod if pair.cheaper_store == StoreType.ROHLIK else r_prod
 
         if winner_prod.unit_price and loser_prod.unit_price:
             return (
