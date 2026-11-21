@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import AsyncGenerator, Dict
-from fastapi import FastAPI
+from typing import Any, AsyncGenerator, Dict
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -39,6 +39,17 @@ app = FastAPI(
     description="Real-time grocery price comparator between Rohlík.cz and Košík.cz with Google Home voice API & Web UI.",
     lifespan=lifespan,
 )
+
+
+@app.middleware("http")
+async def add_cache_control_headers(request: Request, call_next: Any) -> Response:
+    """Disable aggressive browser caching for static files and frontend in development."""
+    response = await call_next(request)
+    if request.url.path.startswith("/static") or request.url.path == "/":
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
 
 # Mount static assets
 static_dir = settings.base_dir / "static"
