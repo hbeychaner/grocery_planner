@@ -182,6 +182,7 @@ document.addEventListener("DOMContentLoaded", () => {
     btnRunCheck.textContent = "⏳ Checking...";
     runStatus.classList.remove("hidden");
     runStatus.textContent = "Running price check across sample of 10 tracked groceries...";
+    const pollTimer = setInterval(loadWatchlist, 3000);
     try {
       const resp = await fetch("/api/v1/history/run?limit=10", { method: "POST" });
       const res = await resp.json();
@@ -190,6 +191,7 @@ document.addEventListener("DOMContentLoaded", () => {
     } catch (err) {
       runStatus.textContent = `Price check failed: ${err.message}`;
     } finally {
+      clearInterval(pollTimer);
       btnRunCheck.disabled = false;
       btnRunCheck.textContent = "▶ Run Check (Sample 10)";
     }

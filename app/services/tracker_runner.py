@@ -60,6 +60,14 @@ class PriceTrackerRunner:
                     count = self.history.record_comparison(comparison, recorded_at=started_dt)
                     snapshots_recorded += count
                     succeeded += 1
+                    done = succeeded + failed
+                    if done % 20 == 0 or done == len(items):
+                        logger.info(
+                            "Tracker progress: %d/%d items (%d snapshots recorded)",
+                            done,
+                            len(items),
+                            snapshots_recorded,
+                        )
                 except Exception as exc:
                     failed += 1
                     logger.warning(f"Price check failed for '{query}': {exc}")
