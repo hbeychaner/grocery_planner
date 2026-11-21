@@ -1,5 +1,5 @@
 from decimal import Decimal
-from app.models.enums import PriceAdvantage, StoreType
+from app.models.enums import PriceAdvantage, StoreType, UnitType
 from app.models.product import StoreProduct
 from app.services.matcher import ProductMatchingService
 
@@ -81,3 +81,31 @@ def test_similarity_ignores_unit_and_number_overlap() -> None:
     # "Kiwi, 1 ks" and "Banán 1 ks" only share "1 ks"
     score = ProductMatchingService.compute_similarity("Kiwi, 1 ks", "Banán 1 ks")
     assert score < 0.3
+
+
+def test_filter_excludes_brand_collision_false_positives() -> None:
+    matcher = ProductMatchingService()
+    fresh_avocado = StoreProduct(
+        store=StoreType.ROHLIK,
+        product_id="av1",
+        name="Avokádo Hass malé 1 ks",
+        brand=None,
+        price=Decimal("36.90"),
+        unit_type=UnitType.KILOGRAM,
+        unit_price=Decimal("217.06"),
+        in_stock=True,
+    )
+    mustard_brand_avokado = StoreProduct(
+        store=StoreType.ROHLIK,
+        product_id="av2",
+        name="Avokádo Medová hořčice",
+        brand="Avokádo",
+        price=Decimal("41.90"),
+        unit_type=UnitType.KILOGRAM,
+        unit_price=Decimal("135.16"),
+        in_stock=True,
+    )
+    filtered = matcher._filter_relevant_products(
+        "avokádo", [fresh_avocado, mustard_brand_avokado], "avocado"
+    )
+    assert [p.product_id for p in filtered] == ["av1"]

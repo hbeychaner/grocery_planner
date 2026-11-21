@@ -240,11 +240,28 @@ class ProductMatchingService:
         if query:
             q_lemmas |= self.get_lemmas(query, "en")
 
+        # Detect whether candidates include items whose brand does NOT collide with the query
+        # (e.g. fresh "Avokádo Hass" has brand=None, whereas spice brand "Avokádo Medová hořčice" has brand="Avokádo").
+        has_non_brand_matches = any(
+            not (p.brand and (self.get_lemmas(p.brand, "cs") & q_lemmas))
+            for p in products
+        )
+
         filtered: List[StoreProduct] = []
 
         for p in products:
-            p_lemmas = self.get_lemmas(p.name, "cs")
-            if p.brand:
+            eval_name = p.name
+            brand_collides = False
+            if has_non_brand_matches and p.brand:
+                brand_lemmas = self.get_lemmas(p.brand, "cs")
+                if brand_lemmas & q_lemmas:
+                    brand_collides = True
+                    stripped = re.sub(re.escape(p.brand), "", p.name, flags=re.IGNORECASE).strip()
+                    if stripped:
+                        eval_name = stripped
+
+            p_lemmas = self.get_lemmas(eval_name, "cs")
+            if p.brand and not brand_collides:
                 p_lemmas |= self.get_lemmas(p.brand, "cs")
 
             # Check 1: Direct lemma overlap with search query
@@ -252,11 +269,16 @@ class ProductMatchingService:
                 filtered.append(p)
                 continue
 
+            # If the query collided with the brand name and the remaining product title
+            # has zero lemma overlap with the query, do not rescue via loose embedding similarity.
+            if brand_collides:
+                continue
+
             # Check 2: Semantic embedding similarity if available
             if self._embedding_model is not None:
                 try:
                     target_query = query_cs or query or ""
-                    embs = self._embedding_model.encode([target_query, p.name], convert_to_tensor=True)
+                    embs = self._embedding_model.encode([target_query, eval_name], convert_to_tensor=True)
                     sem_sim = float(util.cos_sim(embs[0], embs[1])[0][0])
                     if sem_sim >= 0.50:
                         filtered.append(p)

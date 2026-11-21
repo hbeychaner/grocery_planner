@@ -144,15 +144,18 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    snapshotsTbody.innerHTML = combined.map(p => `
+    snapshotsTbody.innerHTML = combined.map(p => {
+      const rowUnit = p.unit_type === "pcs" ? "piece" : (p.unit_type || unitLabel);
+      return `
       <tr style="border-bottom: 1px solid #f1f5f9;">
         <td style="padding: 8px;">${p.recorded_at}</td>
         <td style="padding: 8px; font-weight: 600;">${p.storeLabel}</td>
         <td style="padding: 8px;">${p.product_name} ${p.is_on_sale ? '<span class="sale-pill">SALE</span>' : ''}</td>
         <td style="padding: 8px;">${p.price.toFixed(2)} CZK</td>
-        <td style="padding: 8px; font-weight: 600;">${p.unit_price !== null ? `${p.unit_price.toFixed(2)} CZK/${unitLabel}` : '—'}</td>
+        <td style="padding: 8px; font-weight: 600;">${p.unit_price !== null ? `${p.unit_price.toFixed(2)} CZK/${rowUnit}` : '—'}</td>
       </tr>
-    `).join("");
+    `;
+    }).join("");
   }
 
   filterInput.addEventListener("input", renderWatchlist);
