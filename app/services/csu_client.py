@@ -91,8 +91,8 @@ class CsuPriceIngestionService:
         """Pair a ČSÚ item name to the closest tracked grocery using canonical mappings + spaCy."""
         lower_name = csu_name.strip().lower()
 
-        # Explicit exclusions for non-equivalent items (e.g., infant formula, condensed milk)
-        if any(skip in lower_name for skip in ("kojeneckou", "kondenzované", "dětská výživa")):
+        # Explicit exclusions for non-equivalent items (e.g., infant formula, condensed milk, processed cheese)
+        if any(skip in lower_name for skip in ("kojeneckou", "kondenzované", "dětská výživa", "tavený sýr")):
             return None
 
         # Canonical ČSÚ item prefix -> tracked_groceries.yaml query
