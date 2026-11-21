@@ -49,7 +49,10 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       const resp = await fetch("/a2a", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "A2A-Version": "1.0",
+        },
         body: JSON.stringify({
           jsonrpc: "2.0",
           id: makeId(),

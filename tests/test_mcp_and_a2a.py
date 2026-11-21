@@ -33,6 +33,7 @@ async def test_a2a_agent_card_and_send_message_endpoint() -> None:
         # SendMessage when no Gemini key is set returns helpful config message via A2A Task
         rpc_resp = await ac.post(
             "/a2a",
+            headers={"A2A-Version": "1.0"},
             json={
                 "jsonrpc": "2.0",
                 "id": "req-1",

@@ -97,7 +97,7 @@ class GroceryMCPAgent:
                 genai_types.FunctionDeclaration(
                     name=t.name,
                     description=(t.description or t.name)[:512],
-                    parameters_json_schema=_clean_json_schema(t.inputSchema or {"type": "object", "properties": {}}),
+                    parameters_json_schema=_clean_json_schema(t.input_schema or {"type": "object", "properties": {}}),
                 )
                 for t in mcp_tools
             ]
@@ -198,8 +198,8 @@ def create_agent_card(base_url: str = "http://localhost:8000") -> AgentCard:
         description="Bilingual Czech/English grocery price comparator and historical trends agent powered by Gemini 3.5 Flash & FastMCP.",
         version="0.1.0",
         supported_interfaces=[
-            AgentInterface(protocol_binding="JSONRPC", url=f"{base_url}/a2a"),
-            AgentInterface(protocol_binding="HTTP+JSON", url=f"{base_url}/a2a/rest"),
+            AgentInterface(protocol_binding="JSONRPC", protocol_version="1.0", url=f"{base_url}/a2a"),
+            AgentInterface(protocol_binding="HTTP+JSON", protocol_version="1.0", url=f"{base_url}/a2a/rest"),
         ],
         capabilities=AgentCapabilities(streaming=False, push_notifications=False),
         default_input_modes=["text/plain"],
