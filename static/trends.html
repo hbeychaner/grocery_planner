@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Price Trends — Košík vs. Rohlík</title>
+  <link rel="stylesheet" href="/static/style.css?v=1.2">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="brand">
+        <span class="brand-icon">📈</span>
+        <div>
+          <h1>Weekly Grocery Price Trends</h1>
+          <p class="subtitle">Normalized price per measurement unit over time &bull; Rohlík.cz vs. Košík.cz</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <a href="/" class="btn btn-outline">&larr; Price Comparator</a>
+        <button id="btn-run-check" class="btn btn-primary">▶ Run Check (Sample 10)</button>
+      </div>
+    </header>
+
+    <!-- Summary Stats & Add Item -->
+    <section class="search-section" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; align-items: center;">
+      <div>
+        <div style="font-size: 0.8rem; color: #64748b; text-transform: uppercase; font-weight: 600;">Tracked Groceries</div>
+        <div id="stat-items" style="font-size: 1.6rem; font-weight: 700;">—</div>
+      </div>
+      <div>
+        <div style="font-size: 0.8rem; color: #64748b; text-transform: uppercase; font-weight: 600;">Recorded Snapshots</div>
+        <div id="stat-snapshots" style="font-size: 1.6rem; font-weight: 700;">—</div>
+      </div>
+      <div>
+        <div style="font-size: 0.8rem; color: #64748b; text-transform: uppercase; font-weight: 600;">Last Check</div>
+        <div id="stat-last-run" style="font-size: 1rem; font-weight: 600;">—</div>
+      </div>
+      <form id="add-item-form" style="display: flex; gap: 8px;">
+        <input type="text" id="new-item-input" placeholder="Add grocery to track..." required style="flex: 1; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 8px;" />
+        <button type="submit" class="btn btn-accent">+ Track</button>
+      </form>
+    </section>
+
+    <!-- Status Banner -->
+    <div id="run-status" class="winner-banner tied hidden" style="margin-bottom: 20px;"></div>
+
+    <!-- Main Content: Selector + Chart -->
+    <div style="display: grid; grid-template-columns: 280px 1fr; gap: 20px; align-items: start;">
+      <!-- Watchlist Sidebar -->
+      <aside class="store-card" style="padding: 16px;">
+        <h3 style="margin-bottom: 10px; font-size: 1rem;">Tracked Watchlist</h3>
+        <input type="text" id="filter-items" placeholder="Filter groceries..." style="width: 100%; padding: 8px 10px; margin-bottom: 12px; border: 1px solid #cbd5e1; border-radius: 8px;" />
+        <div id="watchlist-container" style="max-height: 480px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;"></div>
+      </aside>
+
+      <!-- Chart & Snapshot Table -->
+      <main style="display: flex; flex-direction: column; gap: 20px;">
+        <div class="store-card" style="padding: 20px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+            <div>
+              <h2 id="chart-title" style="font-size: 1.25rem;">Select a grocery item</h2>
+              <p id="chart-subtitle" style="font-size: 0.9rem; color: #64748b;">Normalized unit price over time</p>
+            </div>
+            <select id="days-select" style="padding: 6px 10px; border: 1px solid #cbd5e1; border-radius: 8px;">
+              <option value="30">Last 30 days</option>
+              <option value="90" selected>Last 90 days</option>
+              <option value="365">Last 12 months</option>
+            </select>
+          </div>
+          <div style="position: relative; height: 340px;">
+            <canvas id="price-chart"></canvas>
+          </div>
+        </div>
+
+        <div class="store-card" style="padding: 20px;">
+          <h3 style="margin-bottom: 12px; font-size: 1rem;">Recorded Snapshots</h3>
+          <div style="overflow-x: auto;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+              <thead>
+                <tr style="text-align: left; border-bottom: 1px solid #e2e8f0; color: #64748b;">
+                  <th style="padding: 8px;">Timestamp (UTC)</th>
+                  <th style="padding: 8px;">Store</th>
+                  <th style="padding: 8px;">Product</th>
+                  <th style="padding: 8px;">Pack Price</th>
+                  <th style="padding: 8px;">Unit Price</th>
+                </tr>
+              </thead>
+              <tbody id="snapshots-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <footer class="app-footer">
+      <p>Grocery Price Comparator &bull; Weekly Price Tracker</p>
+    </footer>
+  </div>
+
+  <script src="/static/trends.js?v=1.0"></script>
+</body>
+</html>

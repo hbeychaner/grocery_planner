@@ -55,6 +55,10 @@ class AppSettings(BaseSettings):
         default=base_dir / "data" / "translations.db",
         alias="TRANSLATION_DB_PATH",
     )
+    price_history_db_path: Path = Field(
+        default=base_dir / "data" / "price_history.db",
+        alias="PRICE_HISTORY_DB_PATH",
+    )
 
 
 settings = AppSettings()

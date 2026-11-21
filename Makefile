@@ -1,4 +1,4 @@
-.PHONY: start stop stop-all restart test health open-browser langfuse-up langfuse-down help
+.PHONY: start stop stop-all restart test health open-browser langfuse-up langfuse-down track-prices help
 
 PYTHON := ./.venv/bin/python3
 UVICORN := ./.venv/bin/uvicorn
@@ -24,7 +24,8 @@ help:
 	@echo "  make langfuse-down Stop self-hosted Langfuse Docker containers"
 	@echo "  make open-browser  Open Frontend, API Docs, and Langfuse in Google Chrome"
 	@echo "  make health        Check /health endpoint, Langfuse, and Ollama status"
-	@echo "  make test          Run offline pytest suite"
+	@echo "  make test          Run offline pytest suite
+  make track-prices  Run weekly grocery price tracking sweep (all items)"
 
 langfuse-up:
 	@echo "Starting self-hosted Langfuse (Docker Compose)..."
@@ -88,7 +89,10 @@ start:
 
 open-browser:
 	@echo "5. Opening Google Chrome tabs..."
-	@open -a "Google Chrome" "$(APP_URL)" "$(DOCS_URL)" "$(LANGFUSE_URL)"
+	@open -a "Google Chrome" "$(APP_URL)" "$(APP_URL)/trends" "$(DOCS_URL)" "$(LANGFUSE_URL)"
+
+track-prices:
+	$(PYTHON) -m scripts.run_weekly_check
 
 stop:
 	@echo "Stopping FastAPI server on port 8000..."

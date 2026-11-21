@@ -4,16 +4,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const loader = document.getElementById("loader");
   const resultsSection = document.getElementById("results-section");
   const winnerBanner = document.getElementById("winner-banner");
-  const voiceText = document.getElementById("voice-text");
-  const btnSpeak = document.getElementById("btn-speak");
   const rohlikContent = document.getElementById("rohlik-content");
   const kosikContent = document.getElementById("kosik-content");
   const stapleChips = document.querySelectorAll(".chip");
-  const btnToggleIfttt = document.getElementById("btn-toggle-ifttt");
-  const iftttModal = document.getElementById("ifttt-modal");
-  const btnCloseModal = document.getElementById("btn-close-modal");
-
-  let currentVoiceText = "";
 
   // Perform price comparison
   async function performSearch(query) {
@@ -40,10 +33,6 @@ document.addEventListener("DOMContentLoaded", () => {
   // Render results
   function renderResults(data) {
     resultsSection.classList.remove("hidden");
-
-    // Voice card
-    currentVoiceText = data.voice_summary_en || "No voice summary available.";
-    voiceText.textContent = currentVoiceText;
 
     // Winner banner (only display when there is a distinct price advantage)
     winnerBanner.className = "winner-banner";
@@ -159,31 +148,5 @@ document.addEventListener("DOMContentLoaded", () => {
       searchInput.value = query;
       performSearch(query);
     });
-  });
-
-  // Read aloud simulation with Web Speech API
-  btnSpeak.addEventListener("click", () => {
-    if (!currentVoiceText || !('speechSynthesis' in window)) {
-      alert("Text-to-speech is not supported in this browser.");
-      return;
-    }
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(currentVoiceText);
-    utterance.lang = "en-US";
-    utterance.rate = 1.0;
-    window.speechSynthesis.speak(utterance);
-  });
-
-  // Modal toggle
-  btnToggleIfttt.addEventListener("click", () => {
-    iftttModal.classList.remove("hidden");
-  });
-  btnCloseModal.addEventListener("click", () => {
-    iftttModal.classList.add("hidden");
-  });
-  iftttModal.addEventListener("click", (e) => {
-    if (e.target === iftttModal) {
-      iftttModal.classList.add("hidden");
-    }
   });
 });

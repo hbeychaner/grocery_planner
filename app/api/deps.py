@@ -6,6 +6,8 @@ from app.services.comparator import PriceComparisonService
 from app.services.matcher import ProductMatchingService
 from app.services.monitoring import MonitoringService
 from app.services.ollama import OllamaService
+from app.services.price_history import PriceHistoryService
+from app.services.tracker_runner import PriceTrackerRunner
 from app.services.translation_cache import TranslationCacheService
 from app.services.voice_formatter import VoiceResponseFormatter
 
@@ -26,6 +28,12 @@ _comparator_service = PriceComparisonService(
     matching_service=_matcher_service,
     voice_formatter=_voice_formatter,
     ollama_service=_ollama_service,
+)
+_price_history_service = PriceHistoryService()
+_price_history_service.seed_default_items(BilingualQueryService.DICTIONARY)
+_tracker_runner = PriceTrackerRunner(
+    comparator=_comparator_service,
+    history=_price_history_service,
 )
 
 
@@ -57,3 +65,13 @@ def get_rohlik_client() -> BaseStoreClient:
 def get_kosik_client() -> BaseStoreClient:
     """Dependency provider for Kosik client."""
     return _kosik_client
+
+
+def get_price_history_service() -> PriceHistoryService:
+    """Dependency provider for PriceHistoryService."""
+    return _price_history_service
+
+
+def get_tracker_runner() -> PriceTrackerRunner:
+    """Dependency provider for PriceTrackerRunner."""
+    return _tracker_runner

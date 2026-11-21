@@ -1,0 +1,123 @@
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+from pathlib import Path
+from unittest.mock import AsyncMock
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from app.main import app
+from app.models.comparison import ComparisonResponse, MatchedProductPair
+from app.models.enums import PriceAdvantage, StoreType, UnitType
+from app.models.product import StoreProduct
+from app.services.price_history import PriceHistoryService
+from app.services.tracker_runner import PriceTrackerRunner
+
+
+def _make_comparison(query: str, r_unit_price: str, k_unit_price: str) -> ComparisonResponse:
+    r_prod = StoreProduct(
+        store=StoreType.ROHLIK,
+        product_id="r1",
+        name=f"Rohlik {query}",
+        price=Decimal("40.00"),
+        unit_type=UnitType.KILOGRAM,
+        unit_price=Decimal(r_unit_price),
+        in_stock=True,
+    )
+    k_prod = StoreProduct(
+        store=StoreType.KOSIK,
+        product_id="k1",
+        name=f"Kosik {query}",
+        price=Decimal("45.00"),
+        unit_type=UnitType.KILOGRAM,
+        unit_price=Decimal(k_unit_price),
+        in_stock=True,
+    )
+    pair = MatchedProductPair(
+        query=query,
+        query_cs=query,
+        rohlik_product=r_prod,
+        kosik_product=k_prod,
+        advantage=PriceAdvantage.ROHLIK_CHEAPER,
+        cheaper_store=StoreType.ROHLIK,
+        price_difference=Decimal("10.00"),
+        percentage_savings=Decimal("10.0"),
+    )
+    return ComparisonResponse(
+        query=query,
+        query_translated=query,
+        advantage=PriceAdvantage.ROHLIK_CHEAPER,
+        cheapest_store=StoreType.ROHLIK,
+        price_difference=Decimal("10.00"),
+        percentage_savings=Decimal("10.0"),
+        voice_summary_en="test",
+        voice_summary_cs="test",
+        primary_pair=pair,
+        rohlik_ranked=[r_prod],
+        kosik_ranked=[k_prod],
+        category="dairy",
+    )
+
+
+def test_price_history_service_records_and_queries_series() -> None:
+    history = PriceHistoryService(db_path=Path(":memory:"))
+    history.add_tracked_item("butter", query_cs="máslo", category="dairy")
+
+    t1 = datetime.now(timezone.utc) - timedelta(days=7)
+    t2 = datetime.now(timezone.utc)
+
+    history.record_comparison(_make_comparison("butter", "210.00", "235.00"), recorded_at=t1)
+    history.record_comparison(_make_comparison("butter", "199.00", "240.00"), recorded_at=t2)
+
+    series = history.get_item_history("butter", days=30)
+    assert series.query == "butter"
+    assert series.unit_type == "kg"
+    assert len(series.rohlik_series) == 2
+    assert len(series.kosik_series) == 2
+    assert series.rohlik_series[0].unit_price == 210.0
+    assert series.rohlik_series[1].unit_price == 199.0
+
+    items = history.list_tracked_items()
+    assert len(items) == 1
+    assert items[0].latest_rohlik_unit_price == 199.0
+    assert items[0].latest_kosik_unit_price == 240.0
+    history.close()
+
+
+@pytest.mark.asyncio
+async def test_tracker_runner_sweeps_watchlist() -> None:
+    history = PriceHistoryService(db_path=Path(":memory:"))
+    history.add_tracked_item("butter")
+    history.add_tracked_item("milk")
+
+    mock_comparator = AsyncMock()
+    mock_comparator.compare_single_item.side_effect = [
+        _make_comparison("butter", "200.00", "220.00"),
+        _make_comparison("milk", "25.00", "29.00"),
+    ]
+
+    runner = PriceTrackerRunner(
+        comparator=mock_comparator,
+        history=history,
+        concurrency=2,
+        delay_between_requests=0.0,
+    )
+    result = await runner.run()
+    assert result.total_items == 2
+    assert result.succeeded == 2
+    assert result.failed == 0
+    assert result.snapshots_recorded == 4
+    history.close()
+
+
+@pytest.mark.asyncio
+async def test_trends_page_and_history_endpoints() -> None:
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        trends_resp = await ac.get("/trends")
+        assert trends_resp.status_code == 200
+        assert "Weekly Grocery Price Trends" in trends_resp.text
+
+        items_resp = await ac.get("/api/v1/history/items")
+        assert items_resp.status_code == 200
+        data = items_resp.json()
+        assert data["stats"]["tracked_items_count"] > 0

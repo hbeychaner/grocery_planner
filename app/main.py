@@ -9,6 +9,7 @@ from app.api.deps import (
     get_kosik_client,
     get_monitoring_service,
     get_ollama_service,
+    get_price_history_service,
     get_rohlik_client,
     get_translation_cache,
 )
@@ -26,10 +27,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     ollama = get_ollama_service()
     monitoring = get_monitoring_service()
     cache = get_translation_cache()
+    price_history = get_price_history_service()
     await rohlik.close()
     await kosik.close()
     await ollama.close()
     cache.close()
+    price_history.close()
     monitoring.shutdown()
 
 
@@ -45,7 +48,7 @@ app = FastAPI(
 async def add_cache_control_headers(request: Request, call_next: Any) -> Response:
     """Disable aggressive browser caching for static files and frontend in development."""
     response = await call_next(request)
-    if request.url.path.startswith("/static") or request.url.path == "/":
+    if request.url.path.startswith("/static") or request.url.path in ("/", "/trends"):
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
@@ -65,6 +68,13 @@ async def serve_index() -> FileResponse:
     """Serve the lightweight web application UI."""
     index_file = static_dir / "index.html"
     return FileResponse(index_file)
+
+
+@app.get("/trends", include_in_schema=False)
+async def serve_trends() -> FileResponse:
+    """Serve the price-per-unit history & trends dashboard."""
+    trends_file = static_dir / "trends.html"
+    return FileResponse(trends_file)
 
 
 @app.get("/health", tags=["Health"])
