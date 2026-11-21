@@ -62,13 +62,13 @@ def test_price_history_service_records_and_queries_series() -> None:
     history = PriceHistoryService(db_path=Path(":memory:"))
     history.add_tracked_item("butter", query_cs="máslo", category="dairy")
 
-    t1 = datetime.now(timezone.utc) - timedelta(days=7)
+    t1 = datetime.now(timezone.utc) - timedelta(days=35)
     t2 = datetime.now(timezone.utc)
 
     history.record_comparison(_make_comparison("butter", "210.00", "235.00"), recorded_at=t1)
     history.record_comparison(_make_comparison("butter", "199.00", "240.00"), recorded_at=t2)
 
-    series = history.get_item_history("butter", days=30)
+    series = history.get_item_history("butter", days=90)
     assert series.query == "butter"
     assert series.unit_type == "kg"
     assert len(series.rohlik_series) == 2

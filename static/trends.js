@@ -63,7 +63,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   async function loadCategorySeries(category) {
-    const days = daysSelect.value || "90";
+    const days = daysSelect.value || "730";
     const resp = await fetch(`/api/v1/history/analytics/series?category=${encodeURIComponent(category)}&days=${days}`);
     const series = await resp.json();
 
@@ -219,13 +219,13 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   async function loadItemSeries(query) {
-    const days = daysSelect.value || "90";
+    const days = daysSelect.value || "730";
     const resp = await fetch(`/api/v1/history/series?q=${encodeURIComponent(query)}&days=${days}`);
     const data = await resp.json();
 
     const unitLabel = data.unit_type === "pcs" ? "piece" : (data.unit_type || "unit");
     chartTitle.textContent = `${data.query}`;
-    chartSubtitle.textContent = `Lowest available unit price (CZK per ${unitLabel}) over the last ${days} days`;
+    chartSubtitle.textContent = `Monthly average / lowest unit price (CZK per ${unitLabel})`;
 
     renderChart(data, unitLabel);
     renderTable(data, unitLabel);

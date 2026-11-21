@@ -456,8 +456,8 @@ class PriceHistoryService:
             session.commit()
             return len(snapshots)
 
-    def get_item_history(self, query: str, days: int = 90) -> ItemPriceHistory:
-        """Retrieve time-series unit-price snapshots for plotting Regular vs BIO across stores."""
+    def get_item_history(self, query: str, days: int = 730) -> ItemPriceHistory:
+        """Retrieve monthly-bucketed time-series unit-price snapshots for plotting across stores."""
         norm = self._normalize_query(query)
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
@@ -471,19 +471,15 @@ class PriceHistoryService:
                 .order_by(PriceSnapshotRecord.recorded_at.asc(), PriceSnapshotRecord.id.asc())
             ).all()
 
-            rohlik_series: List[PriceSnapshotPoint] = []
-            kosik_series: List[PriceSnapshotPoint] = []
-            rohlik_bio_series: List[PriceSnapshotPoint] = []
-            kosik_bio_series: List[PriceSnapshotPoint] = []
-            csu_series: List[PriceSnapshotPoint] = []
-            bls_series: List[PriceSnapshotPoint] = []
+            # Keep latest snapshot per (store, is_bio, YYYY-MM) so x-points align cleanly by month
+            monthly_latest: Dict[tuple[str, bool, str], PriceSnapshotPoint] = {}
             detected_unit = "kg"
 
             for row in rows:
-                ts_str = (
-                    row.recorded_at.strftime("%Y-%m-%d %H:%M:%S")
+                ym_str = (
+                    row.recorded_at.strftime("%Y-%m")
                     if isinstance(row.recorded_at, datetime)
-                    else str(row.recorded_at)
+                    else str(row.recorded_at)[:7]
                 )
                 point = PriceSnapshotPoint(
                     store=row.store,
@@ -494,21 +490,31 @@ class PriceHistoryService:
                     unit_type=row.unit_type,
                     is_on_sale=bool(row.is_on_sale),
                     is_bio=bool(row.is_bio),
-                    recorded_at=ts_str,
+                    recorded_at=ym_str,
                 )
                 if row.unit_type and not row.is_bio and row.store not in ("csu", "bls"):
                     detected_unit = row.unit_type
                 elif row.unit_type and detected_unit == "kg":
                     detected_unit = row.unit_type
 
-                if row.store == "rohlik":
-                    (rohlik_bio_series if row.is_bio else rohlik_series).append(point)
-                elif row.store == "kosik":
-                    (kosik_bio_series if row.is_bio else kosik_series).append(point)
-                elif row.store == "csu":
-                    csu_series.append(point)
-                elif row.store == "bls":
-                    bls_series.append(point)
+                monthly_latest[(row.store, bool(row.is_bio), ym_str)] = point
+
+            rohlik_series: List[PriceSnapshotPoint] = []
+            kosik_series: List[PriceSnapshotPoint] = []
+            rohlik_bio_series: List[PriceSnapshotPoint] = []
+            kosik_bio_series: List[PriceSnapshotPoint] = []
+            csu_series: List[PriceSnapshotPoint] = []
+            bls_series: List[PriceSnapshotPoint] = []
+
+            for (store_name, is_bio_flag, _), pt in sorted(monthly_latest.items(), key=lambda x: x[0][2]):
+                if store_name == "rohlik":
+                    (rohlik_bio_series if is_bio_flag else rohlik_series).append(pt)
+                elif store_name == "kosik":
+                    (kosik_bio_series if is_bio_flag else kosik_series).append(pt)
+                elif store_name == "csu":
+                    csu_series.append(pt)
+                elif store_name == "bls":
+                    bls_series.append(pt)
 
             return ItemPriceHistory(
                 query=norm,
@@ -700,15 +706,15 @@ class PriceHistoryService:
                 .order_by(PriceSnapshotRecord.recorded_at.asc(), PriceSnapshotRecord.id.asc())
             ).all()
 
-        # Bucket snapshots by date (YYYY-MM-DD HH:MM) so each sweep forms one clean point
+        # Bucket snapshots by month (YYYY-MM) so all sources (Rohlík, Košík, ČSÚ, BLS) align cleanly
         buckets: Dict[str, Dict[str, List[float]]] = {}
         for s in snap_rows:
             if s.unit_price is None:
                 continue
             ts_bucket = (
-                s.recorded_at.strftime("%Y-%m-%d %H:%M")
+                s.recorded_at.strftime("%Y-%m")
                 if isinstance(s.recorded_at, datetime)
-                else str(s.recorded_at)[:16]
+                else str(s.recorded_at)[:7]
             )
             b = buckets.setdefault(ts_bucket, {"rohlik": [], "kosik": [], "bio": [], "csu": [], "bls": []})
             val = float(s.unit_price)
