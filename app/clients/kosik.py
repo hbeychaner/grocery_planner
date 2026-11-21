@@ -180,7 +180,11 @@ class KosikStoreClient(BaseStoreClient):
         elif unit_price_obj is not None:
             unit_price_val = unit_price_obj
 
-        unit_price = Decimal(str(unit_price_val)) if unit_price_val is not None else None
+        unit_price = (
+            Decimal(str(round(float(unit_price_val), 2)))
+            if unit_price_val is not None
+            else None
+        )
 
         # Links and media
         url_path = item.get("url") or ""

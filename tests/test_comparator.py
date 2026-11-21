@@ -20,8 +20,9 @@ async def test_compare_single_item(
 
     assert res.advantage == PriceAdvantage.ROHLIK_CHEAPER
     assert res.cheapest_store == StoreType.ROHLIK
-    assert res.price_difference == Decimal("7.00")
-    assert "Rohlik is cheaper for butter" in res.voice_summary_en
+    # price_difference is now based on unit price (per kg/l): 239.60 - 211.60 = 28.00
+    assert res.price_difference == Decimal("28.00")
+    assert "Rohlik offers the best value for butter" in res.voice_summary_en
 
 
 @pytest.mark.asyncio

@@ -87,9 +87,9 @@ class PriceComparisonService:
             rohlik_term = translated_term
             kosik_term = translated_term
 
-        # Fetch in parallel
-        rohlik_task = self.rohlik.search(rohlik_term, limit=5)
-        kosik_task = self.kosik.search(kosik_term, limit=5)
+        # Fetch more candidates so we can rank by unit price
+        rohlik_task = self.rohlik.search(rohlik_term, limit=10)
+        kosik_task = self.kosik.search(kosik_term, limit=10)
 
         r_products, k_products = await asyncio.gather(
             rohlik_task, kosik_task, return_exceptions=True
@@ -99,6 +99,14 @@ class PriceComparisonService:
         k_list: List[StoreProduct] = k_products if isinstance(k_products, list) else []
 
         best_pair = self.matcher.find_best_pair(clean_query, translated_term, r_list, k_list)
+
+        # Build ranked lists (by unit price ascending) for UI display
+        rohlik_ranked = self.matcher.rank_by_unit_price(
+            self.matcher._filter_relevant_products(translated_term, r_list) or r_list
+        )
+        kosik_ranked = self.matcher.rank_by_unit_price(
+            self.matcher._filter_relevant_products(translated_term, k_list) or k_list
+        )
 
         if not best_pair:
             voice_en = self.formatter.format_single_item_en(None, clean_query)
@@ -116,6 +124,8 @@ class PriceComparisonService:
                 all_pairs=[],
                 rohlik_candidates=r_list,
                 kosik_candidates=k_list,
+                rohlik_ranked=rohlik_ranked,
+                kosik_ranked=kosik_ranked,
             )
 
         voice_en = self.formatter.format_single_item_en(best_pair, clean_query)
@@ -134,6 +144,8 @@ class PriceComparisonService:
             all_pairs=[best_pair],
             rohlik_candidates=r_list,
             kosik_candidates=k_list,
+            rohlik_ranked=rohlik_ranked,
+            kosik_ranked=kosik_ranked,
         )
 
     async def compare_basket(self, items: List[BasketComparisonItem]) -> BasketComparisonResponse:

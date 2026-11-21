@@ -34,6 +34,8 @@ class ComparisonResponse(BaseModel):
     all_pairs: List[MatchedProductPair] = Field(default_factory=list, description="All compared candidate pairs")
     rohlik_candidates: List[StoreProduct] = Field(default_factory=list, description="Top Rohlik search results")
     kosik_candidates: List[StoreProduct] = Field(default_factory=list, description="Top Kosik search results")
+    rohlik_ranked: List[StoreProduct] = Field(default_factory=list, description="Rohlik products ranked by unit price ascending")
+    kosik_ranked: List[StoreProduct] = Field(default_factory=list, description="Kosik products ranked by unit price ascending")
 
 
 class BasketComparisonItem(BaseModel):

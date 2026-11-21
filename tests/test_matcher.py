@@ -18,7 +18,8 @@ def test_compare_products_rohlik_cheaper(
 
     assert pair.advantage == PriceAdvantage.ROHLIK_CHEAPER
     assert pair.cheaper_store == StoreType.ROHLIK
-    assert pair.price_difference == Decimal("7.00")
+    # Comparison is now based on unit price (per kg/l): 239.60 - 211.60 = 28.00
+    assert pair.price_difference == Decimal("28.00")
     assert pair.percentage_savings > Decimal("10.0")
 
 
