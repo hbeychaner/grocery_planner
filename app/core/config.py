@@ -39,6 +39,11 @@ class AppSettings(BaseSettings):
     ollama_think: bool = Field(default=False, alias="OLLAMA_THINK")
     ollama_max_concurrency: int = Field(default=1, alias="OLLAMA_MAX_CONCURRENCY")
 
+    # Gemini & MCP/A2A Agent Configuration
+    gemini_api_key: Optional[str] = Field(default=None, alias="GEMINI_API_KEY")
+    gemini_model: str = Field(default="gemini-3.5-flash", alias="GEMINI_MODEL")
+    mcp_server_url: Optional[str] = Field(default=None, alias="MCP_SERVER_URL")
+
     # Language & Translation Cache Configuration
     default_catalog_language: str = Field(default="cs", alias="DEFAULT_CATALOG_LANGUAGE")
     supported_languages: List[str] = Field(default=["en", "cs"], alias="SUPPORTED_LANGUAGES")

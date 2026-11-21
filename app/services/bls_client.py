@@ -27,7 +27,7 @@ BLS_SERIES_MAP: Dict[str, Tuple[str, str, float, str, str]] = {
     "APU0000FF1101": ("chicken breast", "Chicken breast, boneless", LB_TO_KG, "kg", "lb"),
     "APU0000711211": ("bananas", "Bananas", LB_TO_KG, "kg", "lb"),
     "APU0000711311": ("eating oranges", "Oranges, Navel", LB_TO_KG, "kg", "lb"),
-    "APU0000712112": ("cooking potatoes", "Potatoes, white", LB_TO_KG, "kg", "lb"),
+    "APU0000712112": ("potatoes", "Potatoes, white", LB_TO_KG, "kg", "lb"),
     "APU0000712311": ("vine tomatoes", "Tomatoes, field grown", LB_TO_KG, "kg", "lb"),
     "APU0000717311": ("ground coffee", "Coffee, 100% ground roast", LB_TO_KG, "kg", "lb"),
     "APU0000704111": ("bacon", "Bacon, sliced", LB_TO_KG, "kg", "lb"),

@@ -15,13 +15,16 @@ from app.api.deps import (
     get_translation_cache,
 )
 from app.api.v1.router import api_v1_router
+from app.a2a_agent import mount_a2a_agent
 from app.core.config import settings
+from app.mcp_server import create_mcp_server
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Application lifespan manager for connection pools and monitoring."""
-    yield
+    """Application lifespan manager for connection pools, MCP session manager, and monitoring."""
+    async with mcp_app.lifespan(app):
+        yield
     # Cleanup clients on shutdown
     rohlik = get_rohlik_client()
     kosik = get_kosik_client()
@@ -64,6 +67,17 @@ if static_dir.exists():
 
 # Include API v1 router
 app.include_router(api_v1_router)
+
+# Build and mount FastMCP server (exposing /api/v1/* as MCP tools at /mcp)
+mcp_server = create_mcp_server(app)
+mcp_app = mcp_server.http_app(path="/")
+app.mount("/mcp", mcp_app)
+
+# Mount A2A-compliant agent (/.well-known/agent-card.json, /a2a, /a2a/rest)
+mount_a2a_agent(
+    app,
+    mcp_target=settings.mcp_server_url or mcp_server,
+)
 
 
 @app.get("/", include_in_schema=False)

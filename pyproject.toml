@@ -19,6 +19,9 @@ dependencies = [
     "jinja2>=3.1.4",
     "langfuse>=5.2.0",
     "sqlalchemy>=2.0.0",
+    "fastmcp>=4.0.0",
+    "a2a-sdk>=1.0.0",
+    "google-genai>=1.0.0",
 ]
 
 [project.optional-dependencies]

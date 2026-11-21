@@ -4,12 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Grocery Price Comparator — Košík vs. Rohlík</title>
-  <link rel="stylesheet" href="/static/style.css?v=1.1">
+  <link rel="stylesheet" href="/static/style.css?v=1.2">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
+  <div class="workspace-layout">
   <div class="app-container">
     <!-- Header -->
     <header class="app-header">
@@ -107,6 +108,42 @@
     </footer>
   </div>
 
+  <!-- Right-Side A2A + MCP Chat Window -->
+  <aside class="chat-sidebar" aria-label="Grocery AI Assistant">
+    <div class="chat-header">
+      <div>
+        <h2>🤖 Grocery AI Assistant</h2>
+        <p class="chat-subtitle">A2A Agent &bull; FastMCP &bull; Gemini 3.5 Flash</p>
+      </div>
+      <span class="chat-badge" id="chat-agent-status">A2A Ready</span>
+    </div>
+
+    <div class="chat-suggestions" id="chat-suggestions">
+      <button type="button" class="chip chat-chip" data-prompt="Compare butter prices between Rohlík and Košík">🧈 Butter?</button>
+      <button type="button" class="chip chat-chip" data-prompt="Where is whole milk cheaper right now?">🥛 Milk?</button>
+      <button type="button" class="chip chat-chip" data-prompt="Show me dairy price trends in comparison mode">📈 Dairy trends</button>
+    </div>
+
+    <div id="chat-messages" class="chat-messages">
+      <div class="chat-msg chat-msg-bot">
+        Hi! I'm your A2A Grocery Assistant connected to the FastMCP server. Ask me to compare prices, check your watchlist, or analyze Czech vs. US grocery trends.
+      </div>
+    </div>
+
+    <form id="chat-form" class="chat-input-form">
+      <input
+        type="text"
+        id="chat-input"
+        placeholder="Ask about prices, deals, or trends..."
+        autocomplete="off"
+        required
+      />
+      <button type="submit" id="chat-send-btn" class="btn btn-primary">Send</button>
+    </form>
+  </aside>
+  </div>
+
   <script src="/static/app.js?v=1.3"></script>
+  <script src="/static/chat.js?v=1.0"></script>
 </body>
 </html>

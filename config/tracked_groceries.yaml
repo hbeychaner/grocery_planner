@@ -58,8 +58,8 @@ groceries:
   - { query: "grapefruit", query_cs: "grapefruit", category: "fruits" }
   - { query: "conference pears", query_cs: "hrušky conference", category: "fruits" }
   - { query: "abate fetel pears", query_cs: "hrušky abate fetel", category: "fruits" }
-  - { query: "white seedless grapes", query_cs: "hroznové víno bílé bezsemenné", category: "fruits" }
-  - { query: "red seedless grapes", query_cs: "hroznové víno červené bezsemenné", category: "fruits" }
+  - { query: "white grapes", query_cs: "hroznové víno bílé", category: "fruits" }
+  - { query: "red grapes", query_cs: "hroznové víno červené", category: "fruits" }
   - { query: "strawberries", query_cs: "jahody", category: "fruits" }
   - { query: "blueberries", query_cs: "borůvky", category: "fruits" }
   - { query: "raspberries", query_cs: "maliny", category: "fruits" }
@@ -76,7 +76,7 @@ groceries:
 
   # Vegetables (split by variety where applicable)
   - { query: "salad potatoes", query_cs: "brambory salátové", category: "vegetables" }
-  - { query: "cooking potatoes", query_cs: "brambory konzumní", category: "vegetables" }
+  - { query: "potatoes", query_cs: "brambory", category: "vegetables" }
   - { query: "sweet potatoes", query_cs: "batáty", category: "vegetables" }
   - { query: "yellow onions", query_cs: "žlutá cibule", category: "vegetables" }
   - { query: "red onions", query_cs: "červená cibule", category: "vegetables" }
