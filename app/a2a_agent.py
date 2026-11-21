@@ -171,6 +171,8 @@ class GroceryA2AExecutor(AgentExecutor):
             task_id=context.task_id or "task-unknown",
             context_id=context.context_id or "ctx-default",
         )
+        if not context.current_task:
+            await updater.submit()
         await updater.start_work()
         try:
             user_text = context.get_user_input() or ""
