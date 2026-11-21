@@ -619,16 +619,21 @@ class PriceHistoryService:
 
         def _build_row(cat_key: str, queries_in_cat: List[str]) -> CategoryAnalyticsRow:
             q_set = set(queries_in_cat)
-            core_sources = {"rohlik", "kosik", "csu", "bls"}
             item_sources: Dict[str, set[str]] = {}
             for (q, store, is_bio) in grouped:
-                if q in q_set and not is_bio and store in core_sources:
+                if q in q_set and not is_bio:
                     item_sources.setdefault(q, set()).add(store)
 
-            common_q: Optional[set[str]] = None
+            common_rk: Optional[set[str]] = None
+            common_cb: Optional[set[str]] = None
             if mode_norm == "comparison":
-                common_q = {
-                    q for q, srcs in item_sources.items() if core_sources.issubset(srcs)
+                # Bundle 1: Online providers (Rohlík ∩ Košík)
+                common_rk = {
+                    q for q, srcs in item_sources.items() if {"rohlik", "kosik"}.issubset(srcs)
+                }
+                # Bundle 2: National averages (ČSÚ ∩ US BLS)
+                common_cb = {
+                    q for q, srcs in item_sources.items() if {"csu", "bls"}.issubset(srcs)
                 }
 
             r_latest: List[float] = []
@@ -643,17 +648,20 @@ class PriceHistoryService:
             for (q, store, is_bio), prices in grouped.items():
                 if q not in q_set:
                     continue
-                if common_q is not None and q not in common_q:
-                    continue
                 items_with_data.add(q)
                 latest_p = prices[0]
                 if store == "csu":
-                    csu_latest.append(latest_p)
+                    if common_cb is None or q in common_cb:
+                        csu_latest.append(latest_p)
                 elif store == "bls":
-                    bls_latest.append(latest_p)
+                    if common_cb is None or q in common_cb:
+                        bls_latest.append(latest_p)
                 elif is_bio:
-                    bio_latest.append(latest_p)
+                    if common_rk is None or q in common_rk:
+                        bio_latest.append(latest_p)
                 else:
+                    if common_rk is not None and q not in common_rk:
+                        continue
                     if store == "rohlik":
                         r_latest.append(latest_p)
                     elif store == "kosik":
@@ -669,11 +677,10 @@ class PriceHistoryService:
                 avg_curr = sum(curr_all) / len(curr_all)
                 wow_pct = round(((avg_curr - avg_prev) / avg_prev) * 100, 2)
 
-            item_count = (
-                len(common_q)
-                if common_q is not None
-                else (len(items_with_data) if items_with_data else len(queries_in_cat))
-            )
+            if common_rk is not None and common_cb is not None:
+                item_count = len(common_rk | common_cb)
+            else:
+                item_count = len(items_with_data) if items_with_data else len(queries_in_cat)
 
             return CategoryAnalyticsRow(
                 category=cat_key,
@@ -729,24 +736,29 @@ class PriceHistoryService:
                 if cat_norm == "overall" or (r[1] or "other") == cat_norm
             }
 
+            common_rk_series: Optional[set[str]] = None
+            common_cb_series: Optional[set[str]] = None
             if mode_norm == "comparison" and allowed_queries:
-                core_sources = {"rohlik", "kosik", "csu", "bls"}
                 src_rows = session.execute(
                     select(PriceSnapshotRecord.item_query, PriceSnapshotRecord.store)
                     .where(
                         PriceSnapshotRecord.item_query.in_(allowed_queries),
                         PriceSnapshotRecord.unit_price.is_not(None),
                         PriceSnapshotRecord.is_bio.is_(False),
-                        PriceSnapshotRecord.store.in_(core_sources),
+                        PriceSnapshotRecord.store.in_(("rohlik", "kosik", "csu", "bls")),
                     )
                     .distinct()
                 ).all()
                 by_item: Dict[str, set[str]] = {}
                 for q, st in src_rows:
                     by_item.setdefault(q, set()).add(st)
-                allowed_queries = {
-                    q for q, sts in by_item.items() if core_sources.issubset(sts)
+                common_rk_series = {
+                    q for q, sts in by_item.items() if {"rohlik", "kosik"}.issubset(sts)
                 }
+                common_cb_series = {
+                    q for q, sts in by_item.items() if {"csu", "bls"}.issubset(sts)
+                }
+                allowed_queries = common_rk_series | common_cb_series
 
             if not allowed_queries:
                 return CategoryHistorySeries(
@@ -780,17 +792,22 @@ class PriceHistoryService:
             b = buckets.setdefault(ts_bucket, {"rohlik": [], "kosik": [], "bio": [], "csu": [], "bls": []})
             val = float(s.unit_price)
             if s.store == "csu":
-                b["csu"].append(val)
-                csu_month_items.setdefault(ts_bucket, {}).setdefault(s.item_query, []).append(val)
+                if common_cb_series is None or s.item_query in common_cb_series:
+                    b["csu"].append(val)
+                    csu_month_items.setdefault(ts_bucket, {}).setdefault(s.item_query, []).append(val)
             elif s.store == "bls":
-                b["bls"].append(val)
-                bls_month_items.setdefault(ts_bucket, {}).setdefault(s.item_query, []).append(val)
+                if common_cb_series is None or s.item_query in common_cb_series:
+                    b["bls"].append(val)
+                    bls_month_items.setdefault(ts_bucket, {}).setdefault(s.item_query, []).append(val)
             elif s.is_bio:
-                b["bio"].append(val)
+                if common_rk_series is None or s.item_query in common_rk_series:
+                    b["bio"].append(val)
             elif s.store == "rohlik":
-                b["rohlik"].append(val)
+                if common_rk_series is None or s.item_query in common_rk_series:
+                    b["rohlik"].append(val)
             elif s.store == "kosik":
-                b["kosik"].append(val)
+                if common_rk_series is None or s.item_query in common_rk_series:
+                    b["kosik"].append(val)
 
         points: List[CategorySeriesPoint] = []
         for ts_key in sorted(buckets.keys()):

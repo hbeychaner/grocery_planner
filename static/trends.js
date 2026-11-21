@@ -96,7 +96,7 @@ document.addEventListener("DOMContentLoaded", () => {
     catChartTitle.textContent = meta ? meta.display_name : series.display_name;
     if (catChartSubtitle) {
       catChartSubtitle.textContent = analyticsMode === "comparison"
-        ? "Comparison mode: strictly matched items shared across Rohlík, Košík, ČSÚ & US BLS"
+        ? "Comparison mode: Rohlík ∩ Košík (online) & ČSÚ ∩ US BLS (national)"
         : "Generic mode: all available items per source in each category";
     }
 

@@ -282,7 +282,7 @@ def test_csu_bls_matched_basket_analytics_and_series() -> None:
         )
         session.commit()
 
-    # 1. Comparison mode: only plain flour is in all 4 core sources
+    # 1. Comparison mode: two independent bundles (Rohlík ∩ Košík) and (ČSÚ ∩ BLS)
     comp_analytics = history.get_category_analytics(mode="comparison")
     comp_by_cat = {row.category: row for row in comp_analytics.categories}
     assert comp_by_cat["baking"].item_count == 1
@@ -296,11 +296,46 @@ def test_csu_bls_matched_basket_analytics_and_series() -> None:
     assert comp_analytics.overall.avg_csu_unit_price == 20.0
     assert comp_analytics.overall.avg_bls_unit_price == 30.0
 
+    # Verify the two bundles do NOT interfere with each other:
+    # An item in ČSÚ+BLS only (no Rohlík/Košík) still counts in ČSÚ∩BLS;
+    # an item in Rohlík+Košík only (no ČSÚ/BLS) still counts in Rohlík∩Košík.
+    history.add_tracked_item("sugar", query_cs="cukr", category="baking")
+    history.add_tracked_item("yeast", query_cs="droždí", category="baking")
+    with Session(history.engine) as session:
+        session.add_all(
+            [
+                PriceSnapshotRecord(
+                    item_query="sugar", store="csu", product_name="ČSÚ sugar",
+                    price=30.0, unit_price=30.0, unit_type="kg", recorded_at=ts,
+                ),
+                PriceSnapshotRecord(
+                    item_query="sugar", store="bls", product_name="BLS sugar",
+                    price=40.0, unit_price=40.0, unit_type="kg", recorded_at=ts,
+                ),
+                PriceSnapshotRecord(
+                    item_query="yeast", store="rohlik", product_name="Rohlík yeast",
+                    price=10.0, unit_price=10.0, unit_type="kg", recorded_at=ts,
+                ),
+                PriceSnapshotRecord(
+                    item_query="yeast", store="kosik", product_name="Košík yeast",
+                    price=12.0, unit_price=12.0, unit_type="kg", recorded_at=ts,
+                ),
+            ]
+        )
+        session.commit()
+
+    comp_2 = history.get_category_analytics(mode="comparison")
+    by_cat_2 = {row.category: row for row in comp_2.categories}
+    assert by_cat_2["baking"].avg_rohlik_unit_price == 17.0  # (24 + 10) / 2
+    assert by_cat_2["baking"].avg_kosik_unit_price == 19.0  # (26 + 12) / 2
+    assert by_cat_2["baking"].avg_csu_unit_price == 25.0  # (20 + 30) / 2
+    assert by_cat_2["baking"].avg_bls_unit_price == 35.0  # (30 + 40) / 2
+
     comp_baking_series = history.get_category_series("baking", days=3650, mode="comparison")
     assert len(comp_baking_series.points) == 1
-    assert comp_baking_series.points[0].avg_rohlik == 24.0
-    assert comp_baking_series.points[0].avg_csu == 20.0
-    assert comp_baking_series.points[0].avg_bls == 30.0
+    assert comp_baking_series.points[0].avg_rohlik == 17.0
+    assert comp_baking_series.points[0].avg_csu == 25.0
+    assert comp_baking_series.points[0].avg_bls == 35.0
 
     comp_alcohol_series = history.get_category_series("alcohol", days=3650, mode="comparison")
     assert comp_alcohol_series.points == []
@@ -308,13 +343,13 @@ def test_csu_bls_matched_basket_analytics_and_series() -> None:
     # 2. Generic mode: each source averages over all items it has
     gen_analytics = history.get_category_analytics(mode="generic")
     gen_by_cat = {row.category: row for row in gen_analytics.categories}
-    assert gen_by_cat["baking"].avg_rohlik_unit_price == 112.0  # (24 + 200) / 2
-    assert gen_by_cat["baking"].avg_csu_unit_price == 135.0  # (20 + 250) / 2
-    assert gen_by_cat["baking"].avg_bls_unit_price == 30.0
+    assert round(gen_by_cat["baking"].avg_rohlik_unit_price or 0, 2) == 78.0  # (24 + 200 + 10) / 3
+    assert gen_by_cat["baking"].avg_csu_unit_price == 100.0  # (20 + 250 + 30) / 3
+    assert gen_by_cat["baking"].avg_bls_unit_price == 35.0
     assert gen_by_cat["alcohol"].avg_csu_unit_price == 60.0
 
     gen_baking_series = history.get_category_series("baking", days=3650, mode="generic")
     assert len(gen_baking_series.points) == 1
-    assert gen_baking_series.points[0].avg_rohlik == 112.0
-    assert gen_baking_series.points[0].avg_csu == 135.0
+    assert gen_baking_series.points[0].avg_rohlik == 78.0
+    assert gen_baking_series.points[0].avg_csu == 100.0
     history.close()

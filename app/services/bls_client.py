@@ -39,6 +39,13 @@ BLS_SERIES_MAP: Dict[str, Tuple[str, str, float, str, str]] = {
     "APU0000704211": ("pork tenderloin", "Pork chops, center cut", LB_TO_KG, "kg", "lb"),
     "APU0000703112": ("minced beef", "Ground beef, 100% beef", LB_TO_KG, "kg", "lb"),
     "APU0000711411": ("lemons", "Lemons", LB_TO_KG, "kg", "lb"),
+    "APU0000701322": ("spaghetti", "Spaghetti and macaroni", LB_TO_KG, "kg", "lb"),
+    "APU0000FJ4101": ("white yogurt", "Yogurt", LB_TO_KG * 2.0, "kg", "8 oz"),
+    "APU0000704312": ("ham", "Ham, boneless", LB_TO_KG, "kg", "lb"),
+    "APU0000711415": ("strawberries", "Strawberries, dry pint", LB_TO_KG * (16.0 / 12.0), "kg", "12 oz"),
+    "APU0000712211": ("iceberg lettuce", "Lettuce, iceberg", LB_TO_KG, "kg", "lb"),
+    "APU0000713111": ("orange juice", "Orange juice, concentrate", 8.0 / GAL_TO_L, "l", "16 fl oz"),
+    "APU0000720111": ("pilsner urquell", "Malt beverages (beer)", 8.0 / GAL_TO_L, "l", "16 fl oz"),
 }
 
 
@@ -87,24 +94,35 @@ class BlsPriceIngestionService:
             fx_rates = await self._fetch_monthly_usd_czk_rates(client, start_year, end_year)
             fallback_fx = fx_rates[max(fx_rates.keys())] if fx_rates else 23.0
 
-            payload = {
-                "seriesid": list(BLS_SERIES_MAP.keys()),
-                "startyear": str(start_year),
-                "endyear": str(end_year),
-            }
-            resp = await client.post(BLS_API_URL, json=payload)
-            if resp.status_code != 200:
-                logger.warning(f"BLS API returned HTTP {resp.status_code}")
-                return BlsIngestResult(series_fetched=0, fx_months_loaded=len(fx_rates), snapshots_inserted=0)
+            all_series_ids = list(BLS_SERIES_MAP.keys())
+            series_list = []
+            # BLS Public API v2 accepts max 25 series per request
+            for i in range(0, len(all_series_ids), 25):
+                batch_ids = all_series_ids[i : i + 25]
+                payload = {
+                    "seriesid": batch_ids,
+                    "startyear": str(start_year),
+                    "endyear": str(end_year),
+                }
+                resp = await client.post(BLS_API_URL, json=payload)
+                if resp.status_code != 200:
+                    logger.warning(f"BLS API returned HTTP {resp.status_code} for batch {i}")
+                    continue
+                body = resp.json()
+                series_list.extend(body.get("Results", {}).get("series", []))
 
-            body = resp.json()
-            series_list = body.get("Results", {}).get("series", [])
+            if not series_list:
+                return BlsIngestResult(series_fetched=0, fx_months_loaded=len(fx_rates), snapshots_inserted=0)
 
         new_snapshots: List[PriceSnapshotRecord] = []
         series_with_data = 0
+        seen_sids: set[str] = set()
 
         for s in series_list:
             sid = s.get("seriesID", "")
+            if not sid or sid in seen_sids:
+                continue
+            seen_sids.add(sid)
             meta = BLS_SERIES_MAP.get(sid)
             if not meta:
                 continue
