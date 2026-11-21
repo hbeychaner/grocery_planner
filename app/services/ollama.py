@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import re
@@ -63,6 +64,7 @@ class OllamaService:
         timeout: Optional[float] = None,
         enabled: Optional[bool] = None,
         think: Optional[bool] = None,
+        max_concurrency: Optional[int] = None,
         monitoring: Optional[MonitoringService] = None,
     ) -> None:
         self.base_url = (base_url or settings.ollama_base_url).rstrip("/")
@@ -70,8 +72,19 @@ class OllamaService:
         self.timeout = timeout or settings.ollama_timeout_seconds
         self.enabled = enabled if enabled is not None else settings.ollama_enabled
         self.think = think if think is not None else settings.ollama_think
+        self.max_concurrency = max(1, max_concurrency if max_concurrency is not None else settings.ollama_max_concurrency)
         self.monitoring = monitoring or MonitoringService()
         self._http_client: Optional[httpx.AsyncClient] = None
+        self._semaphore: Optional[asyncio.Semaphore] = None
+        self._semaphore_loop: Optional[asyncio.AbstractEventLoop] = None
+
+    def _get_semaphore(self) -> asyncio.Semaphore:
+        """Return a per-event-loop Semaphore to queue local LLM requests safely."""
+        loop = asyncio.get_running_loop()
+        if self._semaphore is None or self._semaphore_loop is not loop:
+            self._semaphore = asyncio.Semaphore(self.max_concurrency)
+            self._semaphore_loop = loop
+        return self._semaphore
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._http_client is None or self._http_client.is_closed:
@@ -152,7 +165,8 @@ Return ONLY JSON:
                     "stream": False,
                     "options": {"num_predict": 256, "temperature": 0.1},
                 }
-                resp = await client.post("/api/generate", json=payload)
+                async with self._get_semaphore():
+                    resp = await client.post("/api/generate", json=payload)
                 if resp.status_code == 200:
                     body = resp.json()
                     raw_response = body.get("response", "{}")
@@ -226,7 +240,8 @@ Return ONLY valid JSON: {{"relevant_indices": [0, 1]}}"""
                     "stream": False,
                     "options": {"num_predict": 128, "temperature": 0.0},
                 }
-                resp = await client.post("/api/generate", json=payload)
+                async with self._get_semaphore():
+                    resp = await client.post("/api/generate", json=payload)
                 if resp.status_code == 200:
                     body = resp.json()
                     raw_response = body.get("response", "{}")

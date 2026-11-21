@@ -132,3 +132,34 @@ async def test_comparator_uses_llm_to_exclude_flavored_derivatives() -> None:
     assert res.primary_pair.rohlik_product is not None
     assert res.primary_pair.rohlik_product.name == "Čerstvé borůvky 250g"
     assert res.primary_pair.kosik_product is None
+
+
+@pytest.mark.asyncio
+async def test_ollama_semaphore_serializes_concurrent_calls() -> None:
+    """Ensure OllamaService queues concurrent requests via Semaphore(1)."""
+    import asyncio
+
+    service = OllamaService(enabled=True, think=False, max_concurrency=1)
+    active = 0
+    max_active = 0
+
+    async def fake_post(*args: object, **kwargs: object) -> httpx.Response:
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0.02)
+        active -= 1
+        return httpx.Response(200, json={"response": '{"relevant_indices": [0]}'})
+
+    with patch.object(service, "_get_client") as mock_get_client:
+        mock_client = AsyncMock()
+        mock_client.post.side_effect = fake_post
+        mock_get_client.return_value = mock_client
+
+        results = await asyncio.gather(
+            service.filter_relevant_indices("a", ["x"]),
+            service.filter_relevant_indices("b", ["y"]),
+            service.filter_relevant_indices("c", ["z"]),
+        )
+        assert results == [[0], [0], [0]]
+        assert max_active == 1

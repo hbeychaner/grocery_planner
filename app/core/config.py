@@ -37,6 +37,7 @@ class AppSettings(BaseSettings):
     ollama_model: str = Field(default="qwen3.5:latest", alias="OLLAMA_MODEL")
     ollama_timeout_seconds: float = Field(default=30.0, alias="OLLAMA_TIMEOUT_SECONDS")
     ollama_think: bool = Field(default=False, alias="OLLAMA_THINK")
+    ollama_max_concurrency: int = Field(default=1, alias="OLLAMA_MAX_CONCURRENCY")
 
     # Language & Translation Cache Configuration
     default_catalog_language: str = Field(default="cs", alias="DEFAULT_CATALOG_LANGUAGE")
