@@ -163,3 +163,22 @@ async def test_ollama_semaphore_serializes_concurrent_calls() -> None:
         )
         assert results == [[0], [0], [0]]
         assert max_active == 1
+
+
+@pytest.mark.asyncio
+async def test_ollama_caches_identical_prompts() -> None:
+    """Identical prompts must return cached results without making a second API call."""
+    service = OllamaService(enabled=True, think=False)
+    mock_payload = {"response": '{"relevant_indices": [0]}'}
+
+    with patch.object(service, "_get_client") as mock_get_client:
+        mock_client = AsyncMock()
+        mock_client.post.return_value = httpx.Response(200, json=mock_payload)
+        mock_get_client.return_value = mock_client
+
+        first = await service.filter_relevant_indices("blueberries", ["Čerstvé borůvky", "Kefír"], query_cs="borůvky")
+        second = await service.filter_relevant_indices("blueberries", ["Čerstvé borůvky", "Kefír"], query_cs="borůvky")
+
+        assert first == [0]
+        assert second == [0]
+        assert mock_client.post.call_count == 1

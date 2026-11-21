@@ -1,4 +1,6 @@
 import asyncio
+from collections import OrderedDict
+import hashlib
 import json
 import logging
 import re
@@ -77,6 +79,8 @@ class OllamaService:
         self._http_client: Optional[httpx.AsyncClient] = None
         self._semaphore: Optional[asyncio.Semaphore] = None
         self._semaphore_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._prompt_cache: OrderedDict[str, Dict[str, Any]] = OrderedDict()
+        self._cache_max_size: int = 2048
 
     def _get_semaphore(self) -> asyncio.Semaphore:
         """Return a per-event-loop Semaphore to queue local LLM requests safely."""
@@ -85,6 +89,29 @@ class OllamaService:
             self._semaphore = asyncio.Semaphore(self.max_concurrency)
             self._semaphore_loop = loop
         return self._semaphore
+
+    async def _post_generate(self, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Call Ollama /api/generate with exact-prompt caching and Semaphore queueing."""
+        cache_key = hashlib.sha256(
+            f"{payload.get('model')}|{payload.get('think')}|{payload.get('prompt', '')}".encode("utf-8")
+        ).hexdigest()
+        if cache_key in self._prompt_cache:
+            self._prompt_cache.move_to_end(cache_key)
+            return self._prompt_cache[cache_key]
+
+        client = await self._get_client()
+        async with self._get_semaphore():
+            if cache_key in self._prompt_cache:
+                self._prompt_cache.move_to_end(cache_key)
+                return self._prompt_cache[cache_key]
+            resp = await client.post("/api/generate", json=payload)
+            if resp.status_code != 200:
+                return None
+            body: Dict[str, Any] = resp.json()
+            self._prompt_cache[cache_key] = body
+            if len(self._prompt_cache) > self._cache_max_size:
+                self._prompt_cache.popitem(last=False)
+            return body
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._http_client is None or self._http_client.is_closed:
@@ -157,7 +184,6 @@ Return ONLY JSON:
             model_parameters=model_params,
         ) as span:
             try:
-                client = await self._get_client()
                 payload: Dict[str, Any] = {
                     "model": self.model,
                     "prompt": prompt,
@@ -165,10 +191,8 @@ Return ONLY JSON:
                     "stream": False,
                     "options": {"num_predict": 256, "temperature": 0.1},
                 }
-                async with self._get_semaphore():
-                    resp = await client.post("/api/generate", json=payload)
-                if resp.status_code == 200:
-                    body = resp.json()
+                body = await self._post_generate(payload)
+                if body is not None:
                     raw_response = body.get("response", "{}")
                     data = self._extract_json(raw_response)
 
@@ -232,7 +256,6 @@ Return ONLY valid JSON: {{"relevant_indices": [0, 1]}}"""
             model_parameters=model_params,
         ) as span:
             try:
-                client = await self._get_client()
                 payload: Dict[str, Any] = {
                     "model": self.model,
                     "prompt": prompt,
@@ -240,10 +263,8 @@ Return ONLY valid JSON: {{"relevant_indices": [0, 1]}}"""
                     "stream": False,
                     "options": {"num_predict": 128, "temperature": 0.0},
                 }
-                async with self._get_semaphore():
-                    resp = await client.post("/api/generate", json=payload)
-                if resp.status_code == 200:
-                    body = resp.json()
+                body = await self._post_generate(payload)
+                if body is not None:
                     raw_response = body.get("response", "{}")
                     data = self._extract_json(raw_response)
                     indices = data.get("relevant_indices")
