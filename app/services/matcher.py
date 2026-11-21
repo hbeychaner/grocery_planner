@@ -15,7 +15,7 @@ try:
 except ImportError:
     _HAS_TRANSFORMERS = False
 
-from app.models.enums import PriceAdvantage, StoreType
+from app.models.enums import PriceAdvantage, StoreType, UnitType
 from app.models.product import StoreProduct
 from app.models.comparison import MatchedProductPair
 
@@ -236,7 +236,8 @@ class ProductMatchingService:
         if not products:
             return []
 
-        q_lemmas = self.get_lemmas(query_cs, "cs")
+        q_cs_lemmas = self.get_lemmas(query_cs, "cs")
+        q_lemmas = set(q_cs_lemmas)
         if query:
             q_lemmas |= self.get_lemmas(query, "en")
 
@@ -247,7 +248,8 @@ class ProductMatchingService:
             for p in products
         )
 
-        filtered: List[StoreProduct] = []
+        full_cs_matches: List[StoreProduct] = []
+        partial_matches: List[StoreProduct] = []
 
         for p in products:
             eval_name = p.name
@@ -264,9 +266,14 @@ class ProductMatchingService:
             if p.brand and not brand_collides:
                 p_lemmas |= self.get_lemmas(p.brand, "cs")
 
-            # Check 1: Direct lemma overlap with search query
+            # Prefer candidates that satisfy ALL Czech query lemmas (e.g. both "jablečný" AND "ocet")
+            if q_cs_lemmas and q_cs_lemmas <= p_lemmas:
+                full_cs_matches.append(p)
+                continue
+
+            # Check 1: Partial lemma overlap with search query
             if bool(q_lemmas & p_lemmas):
-                filtered.append(p)
+                partial_matches.append(p)
                 continue
 
             # If the query collided with the brand name and the remaining product title
@@ -281,12 +288,40 @@ class ProductMatchingService:
                     embs = self._embedding_model.encode([target_query, eval_name], convert_to_tensor=True)
                     sem_sim = float(util.cos_sim(embs[0], embs[1])[0][0])
                     if sem_sim >= 0.50:
-                        filtered.append(p)
+                        partial_matches.append(p)
                         continue
                 except Exception:
                     pass
 
-        return filtered
+        # When multi-word Czech query has exact full-lemma matches (e.g. "jablečný" + "ocet"),
+        # drop partial matches (e.g. plain "ocet kvasný lihový" or "džus jablečný").
+        filtered = full_cs_matches if full_cs_matches else partial_matches
+        return self._filter_dominant_unit_type(filtered)
+
+    @staticmethod
+    def _filter_dominant_unit_type(products: List[StoreProduct]) -> List[StoreProduct]:
+        """Keep candidates matching the dominant physical unit_type (e.g. exclude tablet 'pcs' from liquid 'l')."""
+        if len(products) <= 1:
+            return products
+
+        from collections import Counter
+
+        counts = Counter(
+            p.unit_type for p in products if p.unit_type and p.unit_type != UnitType.UNKNOWN
+        )
+        if len(counts) <= 1:
+            return products
+
+        dominant_unit, dominant_count = counts.most_common(1)[0]
+        # Only filter when there is a strict majority / plurality winner
+        top_two = counts.most_common(2)
+        if len(top_two) == 2 and top_two[0][1] == top_two[1][1]:
+            return products
+
+        return [
+            p for p in products
+            if p.unit_type == dominant_unit or p.unit_type == UnitType.UNKNOWN
+        ]
 
     def _get_best_unit_price(self, products: List[StoreProduct]) -> StoreProduct:
         """Find product with the lowest normalized unit price (per kg/l), fallback to lowest price."""

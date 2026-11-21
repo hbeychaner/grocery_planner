@@ -109,3 +109,50 @@ def test_filter_excludes_brand_collision_false_positives() -> None:
         "avokádo", [fresh_avocado, mustard_brand_avokado], "avocado"
     )
     assert [p.product_id for p in filtered] == ["av1"]
+
+
+def test_filter_enforces_multi_lemma_coverage_and_dominant_unit() -> None:
+    matcher = ProductMatchingService()
+    cider_vinegar_1 = StoreProduct(
+        store=StoreType.KOSIK,
+        product_id="v1",
+        name="Bzenecký ocet kvasný jablečný 5%",
+        price=Decimal("64.90"),
+        unit_type=UnitType.LITER,
+        unit_price=Decimal("64.90"),
+        in_stock=True,
+    )
+    cider_vinegar_2 = StoreProduct(
+        store=StoreType.KOSIK,
+        product_id="v2",
+        name="Metro Chef Ocet jablečný",
+        price=Decimal("47.90"),
+        unit_type=UnitType.LITER,
+        unit_price=Decimal("95.80"),
+        in_stock=True,
+    )
+    plain_vinegar = StoreProduct(
+        store=StoreType.ROHLIK,
+        product_id="v3",
+        name="Kitchin Ocet kvasný lihový 8%",
+        price=Decimal("12.90"),
+        unit_type=UnitType.LITER,
+        unit_price=Decimal("12.90"),
+        in_stock=True,
+    )
+    vinegar_tablets = StoreProduct(
+        store=StoreType.KOSIK,
+        product_id="v4",
+        name="MedPharma Jablečný ocet 107 tablet",
+        price=Decimal("161.00"),
+        unit_type=UnitType.PIECE,
+        unit_price=Decimal("1.50"),
+        in_stock=True,
+    )
+
+    filtered = matcher._filter_relevant_products(
+        "jablečný ocet",
+        [cider_vinegar_1, cider_vinegar_2, plain_vinegar, vinegar_tablets],
+        "apple cider vinegar",
+    )
+    assert [p.product_id for p in filtered] == ["v1", "v2"]
