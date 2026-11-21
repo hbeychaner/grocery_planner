@@ -30,6 +30,9 @@ from a2a.types import (
     AgentInterface,
     AgentSkill,
     Part,
+    Task,
+    TaskState,
+    TaskStatus,
 )
 from fastapi import FastAPI
 from fastmcp import Client, FastMCP
@@ -166,13 +169,22 @@ class GroceryA2AExecutor(AgentExecutor):
         self.agent = agent
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
+        task_id = context.task_id or "task-unknown"
+        context_id = context.context_id or "ctx-default"
+        if not context.current_task:
+            await event_queue.enqueue_event(
+                Task(
+                    id=task_id,
+                    context_id=context_id,
+                    status=TaskStatus(state=TaskState.TASK_STATE_SUBMITTED),
+                    history=[context.message] if context.message else [],
+                )
+            )
         updater = TaskUpdater(
             event_queue=event_queue,
-            task_id=context.task_id or "task-unknown",
-            context_id=context.context_id or "ctx-default",
+            task_id=task_id,
+            context_id=context_id,
         )
-        if not context.current_task:
-            await updater.submit()
         await updater.start_work()
         try:
             user_text = context.get_user_input() or ""
