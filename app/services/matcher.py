@@ -296,7 +296,32 @@ class ProductMatchingService:
         # When multi-word Czech query has exact full-lemma matches (e.g. "jablečný" + "ocet"),
         # drop partial matches (e.g. plain "ocet kvasný lihový" or "džus jablečný").
         filtered = full_cs_matches if full_cs_matches else partial_matches
-        return self._filter_dominant_unit_type(filtered)
+        filtered = self._filter_dominant_unit_type(filtered)
+        return self._filter_by_organic_preference(filtered, query_cs, query)
+
+    @classmethod
+    def is_organic(cls, text: str) -> bool:
+        """Return True when product title or query explicitly indicates BIO / organic."""
+        if not text:
+            return False
+        norm = cls._strip_accents(text.lower())
+        return bool(re.search(r"\b(bio|organic|eko)\b", norm))
+
+    @classmethod
+    def _filter_by_organic_preference(
+        cls, products: List[StoreProduct], query_cs: str, query: str
+    ) -> List[StoreProduct]:
+        """Separate BIO/organic products from regular products unless the query asks for BIO."""
+        if len(products) <= 1:
+            return products
+
+        wants_bio = cls.is_organic(query_cs) or cls.is_organic(query)
+        if wants_bio:
+            bio_only = [p for p in products if cls.is_organic(p.name)]
+            return bio_only if bio_only else products
+
+        regular_only = [p for p in products if not cls.is_organic(p.name)]
+        return regular_only if regular_only else products
 
     @staticmethod
     def _filter_dominant_unit_type(products: List[StoreProduct]) -> List[StoreProduct]:

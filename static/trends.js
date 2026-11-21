@@ -84,40 +84,74 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function renderChart(data, unitLabel) {
+    const rohlikReg = data.rohlik_series || [];
+    const kosikReg = data.kosik_series || [];
+    const rohlikBio = data.rohlik_bio_series || [];
+    const kosikBio = data.kosik_bio_series || [];
+
     const timestamps = Array.from(new Set([
-      ...data.rohlik_series.map(p => p.recorded_at),
-      ...data.kosik_series.map(p => p.recorded_at),
+      ...rohlikReg.map(p => p.recorded_at),
+      ...kosikReg.map(p => p.recorded_at),
+      ...rohlikBio.map(p => p.recorded_at),
+      ...kosikBio.map(p => p.recorded_at),
     ])).sort();
 
-    const rMap = new Map(data.rohlik_series.map(p => [p.recorded_at, p.unit_price]));
-    const kMap = new Map(data.kosik_series.map(p => [p.recorded_at, p.unit_price]));
+    const rMap = new Map(rohlikReg.map(p => [p.recorded_at, p.unit_price]));
+    const kMap = new Map(kosikReg.map(p => [p.recorded_at, p.unit_price]));
+    const rBioMap = new Map(rohlikBio.map(p => [p.recorded_at, p.unit_price]));
+    const kBioMap = new Map(kosikBio.map(p => [p.recorded_at, p.unit_price]));
 
     if (priceChart) {
       priceChart.destroy();
+    }
+
+    const datasets = [
+      {
+        label: `Rohlík.cz Regular (CZK/${unitLabel})`,
+        data: timestamps.map(t => rMap.has(t) ? rMap.get(t) : null),
+        borderColor: "#7c3aed",
+        backgroundColor: "rgba(124, 58, 237, 0.12)",
+        tension: 0.25,
+        spanGaps: true,
+      },
+      {
+        label: `Košík.cz Regular (CZK/${unitLabel})`,
+        data: timestamps.map(t => kMap.has(t) ? kMap.get(t) : null),
+        borderColor: "#d97706",
+        backgroundColor: "rgba(217, 119, 6, 0.12)",
+        tension: 0.25,
+        spanGaps: true,
+      },
+    ];
+
+    if (rohlikBio.length > 0) {
+      datasets.push({
+        label: `Rohlík.cz BIO (CZK/${unitLabel})`,
+        data: timestamps.map(t => rBioMap.has(t) ? rBioMap.get(t) : null),
+        borderColor: "#16a34a",
+        backgroundColor: "rgba(22, 163, 74, 0.12)",
+        borderDash: [5, 5],
+        tension: 0.25,
+        spanGaps: true,
+      });
+    }
+    if (kosikBio.length > 0) {
+      datasets.push({
+        label: `Košík.cz BIO (CZK/${unitLabel})`,
+        data: timestamps.map(t => kBioMap.has(t) ? kBioMap.get(t) : null),
+        borderColor: "#0d9488",
+        backgroundColor: "rgba(13, 148, 136, 0.12)",
+        borderDash: [5, 5],
+        tension: 0.25,
+        spanGaps: true,
+      });
     }
 
     priceChart = new Chart(chartCanvas, {
       type: "line",
       data: {
         labels: timestamps,
-        datasets: [
-          {
-            label: `Rohlík.cz (CZK/${unitLabel})`,
-            data: timestamps.map(t => rMap.has(t) ? rMap.get(t) : null),
-            borderColor: "#7c3aed",
-            backgroundColor: "rgba(124, 58, 237, 0.12)",
-            tension: 0.25,
-            spanGaps: true,
-          },
-          {
-            label: `Košík.cz (CZK/${unitLabel})`,
-            data: timestamps.map(t => kMap.has(t) ? kMap.get(t) : null),
-            borderColor: "#d97706",
-            backgroundColor: "rgba(217, 119, 6, 0.12)",
-            tension: 0.25,
-            spanGaps: true,
-          },
-        ],
+        datasets,
       },
       options: {
         responsive: true,
@@ -135,8 +169,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function renderTable(data, unitLabel) {
     const combined = [
-      ...data.rohlik_series.map(p => ({ ...p, storeLabel: "Rohlík" })),
-      ...data.kosik_series.map(p => ({ ...p, storeLabel: "Košík" })),
+      ...(data.rohlik_series || []).map(p => ({ ...p, storeLabel: "Rohlík" })),
+      ...(data.kosik_series || []).map(p => ({ ...p, storeLabel: "Košík" })),
+      ...(data.rohlik_bio_series || []).map(p => ({ ...p, storeLabel: "Rohlík" })),
+      ...(data.kosik_bio_series || []).map(p => ({ ...p, storeLabel: "Košík" })),
     ].sort((a, b) => b.recorded_at.localeCompare(a.recorded_at));
 
     if (combined.length === 0) {
@@ -146,11 +182,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
     snapshotsTbody.innerHTML = combined.map(p => {
       const rowUnit = p.unit_type === "pcs" ? "piece" : (p.unit_type || unitLabel);
+      const bioBadge = p.is_bio ? '<span class="best-value-pill" style="background:#dcfce7; color:#166534;">BIO</span> ' : '';
       return `
       <tr style="border-bottom: 1px solid #f1f5f9;">
         <td style="padding: 8px;">${p.recorded_at}</td>
         <td style="padding: 8px; font-weight: 600;">${p.storeLabel}</td>
-        <td style="padding: 8px;">${p.product_name} ${p.is_on_sale ? '<span class="sale-pill">SALE</span>' : ''}</td>
+        <td style="padding: 8px;">${bioBadge}${p.product_name} ${p.is_on_sale ? '<span class="sale-pill">SALE</span>' : ''}</td>
         <td style="padding: 8px;">${p.price.toFixed(2)} CZK</td>
         <td style="padding: 8px; font-weight: 600;">${p.unit_price !== null ? `${p.unit_price.toFixed(2)} CZK/${rowUnit}` : '—'}</td>
       </tr>

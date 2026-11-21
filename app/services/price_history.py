@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
-from sqlalchemy import Boolean, DateTime, Float, Index, Integer, String, create_engine, func, select, update
+from sqlalchemy import Boolean, DateTime, Float, Index, Integer, String, create_engine, func, inspect, select, text, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 from sqlalchemy.pool import StaticPool
@@ -52,6 +52,7 @@ class PriceSnapshotRecord(PriceHistoryBase):
     unit_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     unit_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     is_on_sale: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_bio: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     recorded_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
@@ -80,16 +81,19 @@ class PriceSnapshotPoint(BaseModel):
     unit_price: Optional[float] = None
     unit_type: Optional[str] = None
     is_on_sale: bool = False
+    is_bio: bool = False
     recorded_at: str
 
 
 class ItemPriceHistory(BaseModel):
-    """Time-series price history for a grocery item across both stores."""
+    """Time-series price history for a grocery item across both stores (Regular vs. BIO)."""
 
     query: str
     unit_type: str = "kg"
     rohlik_series: List[PriceSnapshotPoint] = Field(default_factory=list)
     kosik_series: List[PriceSnapshotPoint] = Field(default_factory=list)
+    rohlik_bio_series: List[PriceSnapshotPoint] = Field(default_factory=list)
+    kosik_bio_series: List[PriceSnapshotPoint] = Field(default_factory=list)
 
 
 class PriceHistoryStats(BaseModel):
@@ -120,6 +124,15 @@ class PriceHistoryService:
             )
 
         PriceHistoryBase.metadata.create_all(self.engine)
+        self._ensure_columns()
+
+    def _ensure_columns(self) -> None:
+        """Safely add new columns to existing SQLite databases."""
+        insp = inspect(self.engine)
+        cols = {c["name"] for c in insp.get_columns("price_snapshots")}
+        if "is_bio" not in cols:
+            with self.engine.begin() as conn:
+                conn.execute(text("ALTER TABLE price_snapshots ADD COLUMN is_bio BOOLEAN NOT NULL DEFAULT 0"))
 
     @staticmethod
     def _normalize_query(query: str) -> str:
@@ -233,6 +246,7 @@ class PriceHistoryService:
                 .where(
                     PriceSnapshotRecord.item_query == TrackedItemRecord.query,
                     PriceSnapshotRecord.store == "rohlik",
+                    PriceSnapshotRecord.is_bio.is_(False),
                 )
                 .order_by(PriceSnapshotRecord.recorded_at.desc(), PriceSnapshotRecord.id.desc())
                 .limit(1)
@@ -243,6 +257,7 @@ class PriceHistoryService:
                 .where(
                     PriceSnapshotRecord.item_query == TrackedItemRecord.query,
                     PriceSnapshotRecord.store == "kosik",
+                    PriceSnapshotRecord.is_bio.is_(False),
                 )
                 .order_by(PriceSnapshotRecord.recorded_at.desc(), PriceSnapshotRecord.id.desc())
                 .limit(1)
@@ -298,39 +313,83 @@ class PriceHistoryService:
     def record_comparison(
         self, comparison: ComparisonResponse, recorded_at: Optional[datetime] = None
     ) -> int:
-        """Persist best-value normalized unit prices for both stores from a comparison response."""
+        """Persist best-value regular AND BIO/organic unit prices for both stores."""
+        from app.services.matcher import ProductMatchingService
+
         norm = self._normalize_query(comparison.query)
         ts = recorded_at or datetime.now(timezone.utc)
 
-        r_best: Optional[StoreProduct] = (
-            comparison.rohlik_ranked[0]
-            if comparison.rohlik_ranked
-            else (comparison.primary_pair.rohlik_product if comparison.primary_pair else None)
+        def _pick_regular_and_bio(
+            ranked: List[StoreProduct],
+            candidates: List[StoreProduct],
+            pair_fallback: Optional[StoreProduct],
+        ) -> List[tuple[StoreProduct, bool]]:
+            picked: List[tuple[StoreProduct, bool]] = []
+            # Best regular product from ranked list
+            reg = next((p for p in ranked if not ProductMatchingService.is_organic(p.name)), None)
+            if reg is None and pair_fallback and not ProductMatchingService.is_organic(pair_fallback.name):
+                reg = pair_fallback
+            if reg is not None:
+                picked.append((reg, False))
+
+            # Best BIO/organic product from relevant candidates (matching query + unit_type if regular exists)
+            bio_candidates = [
+                p for p in candidates if ProductMatchingService.is_organic(p.name)
+            ]
+            if bio_candidates:
+                if reg is not None and reg.unit_type:
+                    same_unit_bio = [p for p in bio_candidates if p.unit_type == reg.unit_type]
+                    if same_unit_bio:
+                        bio_candidates = same_unit_bio
+                # Use matcher's relevance & ranking so we don't pick unrelated BIO items
+                relevant_bio = ProductMatchingService()._filter_relevant_products(
+                    comparison.query_translated,
+                    bio_candidates,
+                    comparison.query,
+                )
+                pool = relevant_bio if relevant_bio else []
+                if pool:
+                    best_bio = min(
+                        pool,
+                        key=lambda p: p.unit_price if (p.unit_price and p.unit_price > 0) else p.price,
+                    )
+                    picked.append((best_bio, True))
+
+            # If no regular product existed at all, record pair_fallback if it was BIO
+            if reg is None and not picked and pair_fallback is not None:
+                picked.append((pair_fallback, ProductMatchingService.is_organic(pair_fallback.name)))
+
+            return picked
+
+        r_picks = _pick_regular_and_bio(
+            comparison.rohlik_ranked,
+            comparison.rohlik_candidates,
+            comparison.primary_pair.rohlik_product if comparison.primary_pair else None,
         )
-        k_best: Optional[StoreProduct] = (
-            comparison.kosik_ranked[0]
-            if comparison.kosik_ranked
-            else (comparison.primary_pair.kosik_product if comparison.primary_pair else None)
+        k_picks = _pick_regular_and_bio(
+            comparison.kosik_ranked,
+            comparison.kosik_candidates,
+            comparison.primary_pair.kosik_product if comparison.primary_pair else None,
         )
 
         snapshots: List[PriceSnapshotRecord] = []
-        for store_name, prod in (("rohlik", r_best), ("kosik", k_best)):
-            if prod is None:
-                continue
-            snapshots.append(
-                PriceSnapshotRecord(
-                    item_query=norm,
-                    store=store_name,
-                    product_id=prod.product_id,
-                    product_name=prod.name,
-                    brand=prod.brand,
-                    price=float(prod.price),
-                    unit_price=float(prod.unit_price) if prod.unit_price is not None else None,
-                    unit_type=prod.unit_type.value if prod.unit_type else None,
-                    is_on_sale=bool(prod.is_on_sale),
-                    recorded_at=ts,
+        for store_name, picks in (("rohlik", r_picks), ("kosik", k_picks)):
+            for prod, is_bio_flag in picks:
+                snapshots.append(
+                    PriceSnapshotRecord(
+                        item_query=norm,
+                        store=store_name,
+                        product_id=prod.product_id,
+                        product_name=prod.name,
+                        brand=prod.brand,
+                        price=float(prod.price),
+                        unit_price=float(prod.unit_price) if prod.unit_price is not None else None,
+                        unit_type=prod.unit_type.value if prod.unit_type else None,
+                        is_on_sale=bool(prod.is_on_sale),
+                        is_bio=is_bio_flag,
+                        recorded_at=ts,
+                    )
                 )
-            )
 
         if not snapshots:
             return 0
@@ -349,7 +408,7 @@ class PriceHistoryService:
             return len(snapshots)
 
     def get_item_history(self, query: str, days: int = 90) -> ItemPriceHistory:
-        """Retrieve time-series unit-price snapshots for plotting Rohlík vs Košík over time."""
+        """Retrieve time-series unit-price snapshots for plotting Regular vs BIO across stores."""
         norm = self._normalize_query(query)
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
@@ -365,6 +424,8 @@ class PriceHistoryService:
 
             rohlik_series: List[PriceSnapshotPoint] = []
             kosik_series: List[PriceSnapshotPoint] = []
+            rohlik_bio_series: List[PriceSnapshotPoint] = []
+            kosik_bio_series: List[PriceSnapshotPoint] = []
             detected_unit = "kg"
 
             for row in rows:
@@ -381,20 +442,26 @@ class PriceHistoryService:
                     unit_price=float(row.unit_price) if row.unit_price is not None else None,
                     unit_type=row.unit_type,
                     is_on_sale=bool(row.is_on_sale),
+                    is_bio=bool(row.is_bio),
                     recorded_at=ts_str,
                 )
-                if row.unit_type:
+                if row.unit_type and not row.is_bio:
                     detected_unit = row.unit_type
+                elif row.unit_type and detected_unit == "kg":
+                    detected_unit = row.unit_type
+
                 if row.store == "rohlik":
-                    rohlik_series.append(point)
+                    (rohlik_bio_series if row.is_bio else rohlik_series).append(point)
                 elif row.store == "kosik":
-                    kosik_series.append(point)
+                    (kosik_bio_series if row.is_bio else kosik_series).append(point)
 
             return ItemPriceHistory(
                 query=norm,
                 unit_type=detected_unit,
                 rohlik_series=rohlik_series,
                 kosik_series=kosik_series,
+                rohlik_bio_series=rohlik_bio_series,
+                kosik_bio_series=kosik_bio_series,
             )
 
     def get_stats(self) -> PriceHistoryStats:

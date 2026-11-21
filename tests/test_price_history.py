@@ -121,3 +121,64 @@ async def test_trends_page_and_history_endpoints() -> None:
         assert items_resp.status_code == 200
         data = items_resp.json()
         assert data["stats"]["tracked_items_count"] > 0
+
+
+def test_price_history_separates_bio_and_regular_series() -> None:
+    history = PriceHistoryService(db_path=Path(":memory:"))
+    history.add_tracked_item("gala apples", query_cs="jablka gala", category="produce")
+
+    reg_r = StoreProduct(
+        store=StoreType.ROHLIK,
+        product_id="r_reg",
+        name="Jablka Gala 1 kg",
+        price=Decimal("44.90"),
+        unit_type=UnitType.KILOGRAM,
+        unit_price=Decimal("44.90"),
+        in_stock=True,
+    )
+    bio_r = StoreProduct(
+        store=StoreType.ROHLIK,
+        product_id="r_bio",
+        name="BIO Jablka Gala 600g",
+        price=Decimal("79.90"),
+        unit_type=UnitType.KILOGRAM,
+        unit_price=Decimal("133.17"),
+        in_stock=True,
+    )
+    reg_k = StoreProduct(
+        store=StoreType.KOSIK,
+        product_id="k_reg",
+        name="Sady Životice Jablka Gala",
+        price=Decimal("37.45"),
+        unit_type=UnitType.KILOGRAM,
+        unit_price=Decimal("37.45"),
+        in_stock=True,
+    )
+    comp = ComparisonResponse(
+        query="gala apples",
+        query_translated="jablka gala",
+        advantage=PriceAdvantage.KOSIK_CHEAPER,
+        cheapest_store=StoreType.KOSIK,
+        price_difference=Decimal("7.45"),
+        percentage_savings=Decimal("16.6"),
+        voice_summary_en="test",
+        voice_summary_cs="test",
+        rohlik_candidates=[reg_r, bio_r],
+        kosik_candidates=[reg_k],
+        rohlik_ranked=[reg_r],
+        kosik_ranked=[reg_k],
+        category="produce",
+    )
+    recorded = history.record_comparison(comp)
+    assert recorded == 3
+
+    series = history.get_item_history("gala apples")
+    assert len(series.rohlik_series) == 1
+    assert series.rohlik_series[0].is_bio is False
+    assert series.rohlik_series[0].unit_price == 44.9
+    assert len(series.rohlik_bio_series) == 1
+    assert series.rohlik_bio_series[0].is_bio is True
+    assert series.rohlik_bio_series[0].unit_price == 133.17
+    assert len(series.kosik_series) == 1
+    assert len(series.kosik_bio_series) == 0
+    history.close()
