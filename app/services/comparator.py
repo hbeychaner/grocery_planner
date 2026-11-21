@@ -216,6 +216,23 @@ class PriceComparisonService:
         r_list: List[StoreProduct] = r_results if isinstance(r_results, list) else []
         k_list: List[StoreProduct] = k_results if isinstance(k_results, list) else []
 
+        # Bilingual LLM candidate filtering: reject flavored/derivative products (e.g. blueberry kefir for blueberries)
+        if getattr(self.ollama, "enabled", False) and (r_list or k_list):
+            async def _filter_store(prods: List[StoreProduct]) -> Optional[List[int]]:
+                if not prods:
+                    return None
+                return await self.ollama.filter_relevant_indices(
+                    clean_query, [p.name for p in prods], query_cs=translated_term
+                )
+
+            r_idx_res, k_idx_res = await asyncio.gather(
+                _filter_store(r_list), _filter_store(k_list), return_exceptions=True
+            )
+            if isinstance(r_idx_res, list):
+                r_list = [r_list[i] for i in r_idx_res if 0 <= i < len(r_list)]
+            if isinstance(k_idx_res, list):
+                k_list = [k_list[i] for i in k_idx_res if 0 <= i < len(k_list)]
+
         if monitoring is not None:
             with monitoring.trace_observation(
                 name="match-and-rank-products",

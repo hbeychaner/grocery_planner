@@ -91,3 +91,44 @@ async def test_ollama_graceful_error_handling() -> None:
 
         indices = await service.filter_relevant_indices("anything", ["prod 1"])
         assert indices is None
+
+
+@pytest.mark.asyncio
+async def test_comparator_uses_llm_to_exclude_flavored_derivatives() -> None:
+    """Ensure PriceComparisonService uses Ollama filter_relevant_indices to reject kefir/skyr for blueberries."""
+    from decimal import Decimal
+    from unittest.mock import MagicMock
+    from app.models.enums import StoreType, UnitType
+    from app.models.product import StoreProduct
+    from app.services.comparator import PriceComparisonService
+
+    r_prods = [
+        StoreProduct(store=StoreType.ROHLIK, product_id="r1", name="Activia Kefír borůvka", price=Decimal("31.40"), unit_type=UnitType.KILOGRAM, unit_price=Decimal("112.14"), in_stock=True),
+        StoreProduct(store=StoreType.ROHLIK, product_id="r2", name="Čerstvé borůvky 250g", price=Decimal("89.90"), unit_type=UnitType.KILOGRAM, unit_price=Decimal("359.60"), in_stock=True),
+    ]
+    k_prods = [
+        StoreProduct(store=StoreType.KOSIK, product_id="k1", name="Bohušovická mlékárna Skyr tradiční islandský výrobek borůvka (0,1%)", price=Decimal("20.90"), unit_type=UnitType.KILOGRAM, unit_price=Decimal("160.77"), in_stock=True),
+    ]
+
+    mock_rohlik = MagicMock()
+    mock_rohlik.search = AsyncMock(return_value=r_prods)
+    mock_kosik = MagicMock()
+    mock_kosik.search = AsyncMock(return_value=k_prods)
+
+    mock_ollama = MagicMock()
+    mock_ollama.enabled = True
+    mock_ollama.monitoring = None
+    mock_ollama.analyze_query = AsyncMock(return_value=None)
+    # Rohlík keeps only index 1 (Čerstvé borůvky); Košík rejects index 0 (Skyr borůvka) -> []
+    mock_ollama.filter_relevant_indices = AsyncMock(side_effect=[[1], []])
+
+    comp = PriceComparisonService(
+        rohlik_client=mock_rohlik,
+        kosik_client=mock_kosik,
+        ollama_service=mock_ollama,
+    )
+    res = await comp.compare_single_item("blueberries")
+    assert res.primary_pair is not None
+    assert res.primary_pair.rohlik_product is not None
+    assert res.primary_pair.rohlik_product.name == "Čerstvé borůvky 250g"
+    assert res.primary_pair.kosik_product is None

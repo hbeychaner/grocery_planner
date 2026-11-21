@@ -186,26 +186,35 @@ Return ONLY JSON:
 
         return None
 
-    async def filter_relevant_indices(self, query: str, titles: List[str]) -> Optional[List[int]]:
-        """Ask LLM which candidate product titles are directly relevant to the user query."""
+    async def filter_relevant_indices(
+        self,
+        query: str,
+        titles: List[str],
+        query_cs: Optional[str] = None,
+    ) -> Optional[List[int]]:
+        """Ask LLM which candidate product titles actually ARE the requested grocery item."""
         if not self.enabled or not titles:
             return None
 
         items_str = "\n".join(f"{i}: {title}" for i, title in enumerate(titles))
-        prompt = f"""Grocery search query: "{query}"
+        query_label = f'"{query}" (Czech: "{query_cs}")' if query_cs and query_cs.lower() != query.lower() else f'"{query}"'
+        prompt = f"""Requested grocery item: {query_label}
 Candidate products:
 {items_str}
 
-Select only the indices of products that directly match the requested item.
-Exclude unrelated fallback suggestions from different categories.
-Return ONLY raw valid JSON: {{"relevant_indices": [0, 1]}}"""
+Select ONLY the indices of products that ARE the requested item itself (plain/fresh/standard form).
+STRICTLY EXCLUDE different products that merely contain it as a flavor, ingredient, or derivative:
+- e.g. for "blueberries" / "borůvky": include fresh or frozen blueberries, EXCLUDE blueberry kefir, skyr, yogurt, jam, tea, or juice.
+- e.g. for "butter" / "máslo": include dairy butter, EXCLUDE butter cookies, peanut butter, or cocoa butter.
+- e.g. for "chicken breast" / "kuřecí prsa": include chicken breast meat, EXCLUDE chicken broth, soup, or cat food.
+Return ONLY valid JSON: {{"relevant_indices": [0, 1]}}"""
 
-        model_params = {"num_predict": 128, "temperature": 0.1, "think": self.think}
+        model_params = {"num_predict": 128, "temperature": 0.0, "think": self.think}
         with self.monitoring.trace_generation(
             name="filter-relevant-candidates",
             model=self.model,
             input_data=[{"role": "user", "content": prompt}],
-            metadata={"query": query, "candidate_count": len(titles)},
+            metadata={"query": query, "query_cs": query_cs, "candidate_count": len(titles)},
             model_parameters=model_params,
         ) as span:
             try:
@@ -215,7 +224,7 @@ Return ONLY raw valid JSON: {{"relevant_indices": [0, 1]}}"""
                     "prompt": prompt,
                     "think": self.think,
                     "stream": False,
-                    "options": {"num_predict": 128, "temperature": 0.1},
+                    "options": {"num_predict": 128, "temperature": 0.0},
                 }
                 resp = await client.post("/api/generate", json=payload)
                 if resp.status_code == 200:
@@ -227,7 +236,7 @@ Return ONLY raw valid JSON: {{"relevant_indices": [0, 1]}}"""
                         valid = [
                             int(i)
                             for i in indices
-                            if isinstance(i, (int, str)) and str(i).isdigit() and int(i) < len(titles)
+                            if isinstance(i, (int, str)) and str(i).isdigit() and 0 <= int(i) < len(titles)
                         ]
                         if span is not None:
                             span.update(
