@@ -547,8 +547,15 @@ class PriceHistoryService:
                 else (str(last_ts) if last_ts is not None else None),
             )
 
-    def get_category_analytics(self) -> CategoryAnalyticsResponse:
-        """Compute overall and per-category average unit prices and weekly inflation %."""
+    def get_category_analytics(self, mode: str = "generic") -> CategoryAnalyticsResponse:
+        """Compute overall and per-category average unit prices and weekly inflation %.
+
+        Args:
+            mode: ``"generic"`` averages each source over all available items in the
+                category; ``"comparison"`` restricts all sources to the common basket
+                of items that have data in Rohlík, Košík, ČSÚ, and US BLS.
+        """
+        mode_norm = "comparison" if mode == "comparison" else "generic"
         CATEGORY_LABELS = {
             "overall": "Overall (All Categories)",
             "fruits": "Fruits",
@@ -612,11 +619,23 @@ class PriceHistoryService:
 
         def _build_row(cat_key: str, queries_in_cat: List[str]) -> CategoryAnalyticsRow:
             q_set = set(queries_in_cat)
+            core_sources = {"rohlik", "kosik", "csu", "bls"}
+            item_sources: Dict[str, set[str]] = {}
+            for (q, store, is_bio) in grouped:
+                if q in q_set and not is_bio and store in core_sources:
+                    item_sources.setdefault(q, set()).add(store)
+
+            common_q: Optional[set[str]] = None
+            if mode_norm == "comparison":
+                common_q = {
+                    q for q, srcs in item_sources.items() if core_sources.issubset(srcs)
+                }
+
             r_latest: List[float] = []
             k_latest: List[float] = []
             bio_latest: List[float] = []
-            csu_by_q: Dict[str, float] = {}
-            bls_by_q: Dict[str, float] = {}
+            csu_latest: List[float] = []
+            bls_latest: List[float] = []
             curr_all: List[float] = []
             prev_all: List[float] = []
 
@@ -624,12 +643,14 @@ class PriceHistoryService:
             for (q, store, is_bio), prices in grouped.items():
                 if q not in q_set:
                     continue
+                if common_q is not None and q not in common_q:
+                    continue
                 items_with_data.add(q)
                 latest_p = prices[0]
                 if store == "csu":
-                    csu_by_q.setdefault(q, latest_p)
+                    csu_latest.append(latest_p)
                 elif store == "bls":
-                    bls_by_q.setdefault(q, latest_p)
+                    bls_latest.append(latest_p)
                 elif is_bio:
                     bio_latest.append(latest_p)
                 else:
@@ -641,11 +662,6 @@ class PriceHistoryService:
                         curr_all.append(latest_p)
                         prev_all.append(prices[1])
 
-            # Pair ČSÚ and US BLS strictly on items that have data in BOTH sources
-            common_csu_bls = sorted(set(csu_by_q.keys()) & set(bls_by_q.keys()))
-            csu_latest = [csu_by_q[q] for q in common_csu_bls]
-            bls_latest = [bls_by_q[q] for q in common_csu_bls]
-
             blended_pool = r_latest + k_latest
             wow_pct: Optional[float] = None
             if prev_all and sum(prev_all) > 0:
@@ -653,10 +669,16 @@ class PriceHistoryService:
                 avg_curr = sum(curr_all) / len(curr_all)
                 wow_pct = round(((avg_curr - avg_prev) / avg_prev) * 100, 2)
 
+            item_count = (
+                len(common_q)
+                if common_q is not None
+                else (len(items_with_data) if items_with_data else len(queries_in_cat))
+            )
+
             return CategoryAnalyticsRow(
                 category=cat_key,
                 display_name=CATEGORY_LABELS.get(cat_key, cat_key.replace("_", " ").title()),
-                item_count=len(items_with_data) if items_with_data else len(queries_in_cat),
+                item_count=item_count,
                 avg_rohlik_unit_price=round(sum(r_latest) / len(r_latest), 2) if r_latest else None,
                 avg_kosik_unit_price=round(sum(k_latest) / len(k_latest), 2) if k_latest else None,
                 blended_avg_unit_price=round(sum(blended_pool) / len(blended_pool), 2) if blended_pool else None,
@@ -679,10 +701,21 @@ class PriceHistoryService:
         category_rows = [_build_row(c, by_cat[c]) for c in ordered_cats]
         return CategoryAnalyticsResponse(overall=overall_row, categories=category_rows)
 
-    def get_category_series(self, category: str = "overall", days: int = 90) -> CategoryHistorySeries:
-        """Compute time-series average unit prices for a category (or overall) across sweeps."""
+    def get_category_series(
+        self, category: str = "overall", days: int = 90, mode: str = "generic"
+    ) -> CategoryHistorySeries:
+        """Compute time-series average unit prices for a category (or overall) across sweeps.
+
+        Args:
+            category: Category slug or ``"overall"``.
+            days: Lookback window in days.
+            mode: ``"generic"`` averages each source independently over all items in the
+                category; ``"comparison"`` restricts to items shared across Rohlík, Košík,
+                ČSÚ, and US BLS (and pairs ČSÚ/BLS per month).
+        """
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         cat_norm = (category or "overall").strip().lower()
+        mode_norm = "comparison" if mode == "comparison" else "generic"
 
         with Session(self.engine) as session:
             item_rows = session.execute(
@@ -695,6 +728,25 @@ class PriceHistoryService:
                 for r in item_rows
                 if cat_norm == "overall" or (r[1] or "other") == cat_norm
             }
+
+            if mode_norm == "comparison" and allowed_queries:
+                core_sources = {"rohlik", "kosik", "csu", "bls"}
+                src_rows = session.execute(
+                    select(PriceSnapshotRecord.item_query, PriceSnapshotRecord.store)
+                    .where(
+                        PriceSnapshotRecord.item_query.in_(allowed_queries),
+                        PriceSnapshotRecord.unit_price.is_not(None),
+                        PriceSnapshotRecord.is_bio.is_(False),
+                        PriceSnapshotRecord.store.in_(core_sources),
+                    )
+                    .distinct()
+                ).all()
+                by_item: Dict[str, set[str]] = {}
+                for q, st in src_rows:
+                    by_item.setdefault(q, set()).add(st)
+                allowed_queries = {
+                    q for q, sts in by_item.items() if core_sources.issubset(sts)
+                }
 
             if not allowed_queries:
                 return CategoryHistorySeries(
@@ -725,11 +777,13 @@ class PriceHistoryService:
                 if isinstance(s.recorded_at, datetime)
                 else str(s.recorded_at)[:7]
             )
-            b = buckets.setdefault(ts_bucket, {"rohlik": [], "kosik": [], "bio": []})
+            b = buckets.setdefault(ts_bucket, {"rohlik": [], "kosik": [], "bio": [], "csu": [], "bls": []})
             val = float(s.unit_price)
             if s.store == "csu":
+                b["csu"].append(val)
                 csu_month_items.setdefault(ts_bucket, {}).setdefault(s.item_query, []).append(val)
             elif s.store == "bls":
+                b["bls"].append(val)
                 bls_month_items.setdefault(ts_bucket, {}).setdefault(s.item_query, []).append(val)
             elif s.is_bio:
                 b["bio"].append(val)
@@ -744,11 +798,15 @@ class PriceHistoryService:
             r_vals = b["rohlik"]
             k_vals = b["kosik"]
             bio_vals = b["bio"]
-            csu_items = csu_month_items.get(ts_key, {})
-            bls_items = bls_month_items.get(ts_key, {})
-            common_items = set(csu_items.keys()) & set(bls_items.keys())
-            csu_vals = [sum(csu_items[q]) / len(csu_items[q]) for q in common_items]
-            bls_vals = [sum(bls_items[q]) / len(bls_items[q]) for q in common_items]
+            if mode_norm == "comparison":
+                csu_items = csu_month_items.get(ts_key, {})
+                bls_items = bls_month_items.get(ts_key, {})
+                common_items = set(csu_items.keys()) & set(bls_items.keys())
+                csu_vals = [sum(csu_items[q]) / len(csu_items[q]) for q in common_items]
+                bls_vals = [sum(bls_items[q]) / len(bls_items[q]) for q in common_items]
+            else:
+                csu_vals = b["csu"]
+                bls_vals = b["bls"]
             blended_vals = r_vals + k_vals
             points.append(
                 CategorySeriesPoint(

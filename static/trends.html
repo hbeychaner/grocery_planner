@@ -55,7 +55,13 @@
     <!-- Overall & Category Inflation Analytics (Master-Detail Graph) -->
     <section style="display: grid; grid-template-columns: 280px 1fr; gap: 20px; align-items: start; margin-bottom: 24px;">
       <aside class="store-card" style="padding: 16px;">
-        <h3 style="margin-bottom: 10px; font-size: 1rem;">📊 Categories &amp; Overall</h3>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; gap: 8px; flex-wrap: wrap;">
+          <h3 style="margin: 0; font-size: 1rem;">📊 Categories &amp; Overall</h3>
+          <div id="analytics-mode-toggle" style="display: inline-flex; border: 1px solid #cbd5e1; border-radius: 8px; overflow: hidden; font-size: 0.78rem;">
+            <button type="button" data-mode="comparison" title="Only items shared across Rohlík, Košík, ČSÚ, and US BLS" style="padding: 4px 10px; border: none; cursor: pointer; background: #6366f1; color: #fff; font-weight: 600;">Comparison</button>
+            <button type="button" data-mode="generic" title="All available items per source in each category" style="padding: 4px 10px; border: none; cursor: pointer; background: #f8fafc; color: #334155;">Generic</button>
+          </div>
+        </div>
         <div id="category-list-container" style="max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;"></div>
       </aside>
 
@@ -127,6 +133,6 @@
     </footer>
   </div>
 
-  <script src="/static/trends.js?v=1.5"></script>
+  <script src="/static/trends.js?v=1.6"></script>
 </body>
 </html>

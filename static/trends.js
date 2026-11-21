@@ -15,20 +15,45 @@ document.addEventListener("DOMContentLoaded", () => {
   const daysSelect = document.getElementById("days-select");
   const snapshotsTbody = document.getElementById("snapshots-tbody");
   const categoryListContainer = document.getElementById("category-list-container");
+  const analyticsModeToggle = document.getElementById("analytics-mode-toggle");
   const catChartTitle = document.getElementById("cat-chart-title");
+  const catChartSubtitle = document.getElementById("cat-chart-subtitle");
   const catSummaryPills = document.getElementById("cat-summary-pills");
   const categoryCanvas = document.getElementById("category-chart");
   const chartCanvas = document.getElementById("price-chart");
 
   let allItems = [];
   let analyticsRows = [];
+  let analyticsMode = "comparison";
   let selectedQuery = null;
   let selectedCategory = null; // null means 'overall'
   let priceChart = null;
   let categoryChart = null;
 
+  function renderModeToggle() {
+    if (!analyticsModeToggle) return;
+    analyticsModeToggle.querySelectorAll("button[data-mode]").forEach(btn => {
+      const active = btn.getAttribute("data-mode") === analyticsMode;
+      btn.style.background = active ? "#6366f1" : "#f8fafc";
+      btn.style.color = active ? "#fff" : "#334155";
+      btn.style.fontWeight = active ? "600" : "400";
+    });
+  }
+
+  if (analyticsModeToggle) {
+    analyticsModeToggle.querySelectorAll("button[data-mode]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const nextMode = btn.getAttribute("data-mode");
+        if (!nextMode || nextMode === analyticsMode) return;
+        analyticsMode = nextMode;
+        renderModeToggle();
+        await loadAnalytics();
+      });
+    });
+  }
+
   async function loadAnalytics() {
-    const resp = await fetch("/api/v1/history/analytics");
+    const resp = await fetch(`/api/v1/history/analytics?mode=${encodeURIComponent(analyticsMode)}`);
     const data = await resp.json();
     analyticsRows = [data.overall, ...(data.categories || [])];
     renderCategoryList();
@@ -64,11 +89,16 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function loadCategorySeries(category) {
     const days = daysSelect.value || "730";
-    const resp = await fetch(`/api/v1/history/analytics/series?category=${encodeURIComponent(category)}&days=${days}`);
+    const resp = await fetch(`/api/v1/history/analytics/series?category=${encodeURIComponent(category)}&days=${days}&mode=${encodeURIComponent(analyticsMode)}`);
     const series = await resp.json();
 
     const meta = analyticsRows.find(r => r.category === category) || analyticsRows[0];
     catChartTitle.textContent = meta ? meta.display_name : series.display_name;
+    if (catChartSubtitle) {
+      catChartSubtitle.textContent = analyticsMode === "comparison"
+        ? "Comparison mode: strictly matched items shared across Rohlík, Košík, ČSÚ & US BLS"
+        : "Generic mode: all available items per source in each category";
+    }
 
     if (meta) {
       const fmt = (v) => (v !== null && v !== undefined) ? `${v.toFixed(2)} CZK` : "—";

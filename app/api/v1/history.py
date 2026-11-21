@@ -34,20 +34,30 @@ class TrackedItemsListResponse(BaseModel):
 
 @router.get("/analytics", response_model=CategoryAnalyticsResponse)
 async def get_category_analytics(
+    mode: str = Query(
+        default="generic",
+        pattern="^(generic|comparison)$",
+        description="Analytics aggregation mode: 'generic' (all items) or 'comparison' (matched basket across all sources)",
+    ),
     history: PriceHistoryService = Depends(get_price_history_service),
 ) -> CategoryAnalyticsResponse:
     """Return overall and per-category average unit prices and weekly inflation metrics."""
-    return history.get_category_analytics()
+    return history.get_category_analytics(mode=mode)
 
 
 @router.get("/analytics/series", response_model=CategoryHistorySeries)
 async def get_category_series(
     category: str = Query(default="overall", description="Category slug or 'overall'"),
     days: int = Query(default=90, ge=1, le=3650, description="Lookback window in days"),
+    mode: str = Query(
+        default="generic",
+        pattern="^(generic|comparison)$",
+        description="Analytics aggregation mode: 'generic' (all items) or 'comparison' (matched basket across all sources)",
+    ),
     history: PriceHistoryService = Depends(get_price_history_service),
 ) -> CategoryHistorySeries:
     """Return time-series average unit prices for a category or overall."""
-    return history.get_category_series(category=category, days=days)
+    return history.get_category_series(category=category, days=days, mode=mode)
 
 
 @router.get("/items", response_model=TrackedItemsListResponse)

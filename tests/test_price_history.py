@@ -124,13 +124,17 @@ async def test_trends_page_and_history_endpoints() -> None:
         data = items_resp.json()
         assert data["stats"]["tracked_items_count"] > 0
 
-        analytics_resp = await ac.get("/api/v1/history/analytics")
+        analytics_resp = await ac.get("/api/v1/history/analytics?mode=generic")
         assert analytics_resp.status_code == 200
         analytics = analytics_resp.json()
         assert analytics["overall"]["category"] == "overall"
         assert len(analytics["categories"]) > 0
 
-        cat_series_resp = await ac.get("/api/v1/history/analytics/series?category=overall&days=90")
+        comp_resp = await ac.get("/api/v1/history/analytics?mode=comparison")
+        assert comp_resp.status_code == 200
+        assert comp_resp.json()["overall"]["category"] == "overall"
+
+        cat_series_resp = await ac.get("/api/v1/history/analytics/series?category=overall&days=90&mode=comparison")
         assert cat_series_resp.status_code == 200
         cat_series = cat_series_resp.json()
         assert cat_series["category"] == "overall"
@@ -198,7 +202,7 @@ def test_price_history_separates_bio_and_regular_series() -> None:
 
 
 def test_csu_bls_matched_basket_analytics_and_series() -> None:
-    """ČSÚ vs. US BLS averages must only include items present in BOTH sources."""
+    """Comparison mode restricts all sources to shared items; generic mode averages all items."""
     history = PriceHistoryService(db_path=Path(":memory:"))
     history.add_tracked_item("plain flour", query_cs="hladká mouka", category="baking")
     history.add_tracked_item("honey", query_cs="med", category="baking")
@@ -208,6 +212,25 @@ def test_csu_bls_matched_basket_analytics_and_series() -> None:
     with Session(history.engine) as session:
         session.add_all(
             [
+                # plain flour has ALL 4 core sources (rohlik, kosik, csu, bls)
+                PriceSnapshotRecord(
+                    item_query="plain flour",
+                    store="rohlik",
+                    product_name="Rohlík plain flour",
+                    price=24.0,
+                    unit_price=24.0,
+                    unit_type="kg",
+                    recorded_at=ts,
+                ),
+                PriceSnapshotRecord(
+                    item_query="plain flour",
+                    store="kosik",
+                    product_name="Košík plain flour",
+                    price=26.0,
+                    unit_price=26.0,
+                    unit_type="kg",
+                    recorded_at=ts,
+                ),
                 PriceSnapshotRecord(
                     item_query="plain flour",
                     store="csu",
@@ -226,7 +249,16 @@ def test_csu_bls_matched_basket_analytics_and_series() -> None:
                     unit_type="kg",
                     recorded_at=ts,
                 ),
-                # honey is only in ČSÚ, not in BLS — must be excluded from ČSÚ vs. BLS average
+                # honey is only in ČSÚ + Rohlík (not BLS/Košík) — excluded in comparison, included in generic
+                PriceSnapshotRecord(
+                    item_query="honey",
+                    store="rohlik",
+                    product_name="Rohlík honey",
+                    price=200.0,
+                    unit_price=200.0,
+                    unit_type="kg",
+                    recorded_at=ts,
+                ),
                 PriceSnapshotRecord(
                     item_query="honey",
                     store="csu",
@@ -236,7 +268,7 @@ def test_csu_bls_matched_basket_analytics_and_series() -> None:
                     unit_type="kg",
                     recorded_at=ts,
                 ),
-                # pilsner urquell is only in ČSÚ under alcohol — avg_csu/avg_bls should both be None
+                # pilsner urquell is only in ČSÚ under alcohol
                 PriceSnapshotRecord(
                     item_query="pilsner urquell",
                     store="csu",
@@ -250,23 +282,39 @@ def test_csu_bls_matched_basket_analytics_and_series() -> None:
         )
         session.commit()
 
-    analytics = history.get_category_analytics()
-    by_cat = {row.category: row for row in analytics.categories}
-    assert by_cat["baking"].avg_csu_unit_price == 20.0
-    assert by_cat["baking"].avg_bls_unit_price == 30.0
-    assert by_cat["alcohol"].display_name == "Alcoholic Beverages"
-    assert by_cat["alcohol"].avg_csu_unit_price is None
-    assert by_cat["alcohol"].avg_bls_unit_price is None
-    assert analytics.overall.avg_csu_unit_price == 20.0
-    assert analytics.overall.avg_bls_unit_price == 30.0
+    # 1. Comparison mode: only plain flour is in all 4 core sources
+    comp_analytics = history.get_category_analytics(mode="comparison")
+    comp_by_cat = {row.category: row for row in comp_analytics.categories}
+    assert comp_by_cat["baking"].item_count == 1
+    assert comp_by_cat["baking"].avg_rohlik_unit_price == 24.0
+    assert comp_by_cat["baking"].avg_csu_unit_price == 20.0
+    assert comp_by_cat["baking"].avg_bls_unit_price == 30.0
+    assert comp_by_cat["alcohol"].display_name == "Alcoholic Beverages"
+    assert comp_by_cat["alcohol"].item_count == 0
+    assert comp_by_cat["alcohol"].avg_csu_unit_price is None
+    assert comp_analytics.overall.avg_rohlik_unit_price == 24.0
+    assert comp_analytics.overall.avg_csu_unit_price == 20.0
+    assert comp_analytics.overall.avg_bls_unit_price == 30.0
 
-    baking_series = history.get_category_series("baking", days=3650)
-    assert len(baking_series.points) == 1
-    assert baking_series.points[0].avg_csu == 20.0
-    assert baking_series.points[0].avg_bls == 30.0
+    comp_baking_series = history.get_category_series("baking", days=3650, mode="comparison")
+    assert len(comp_baking_series.points) == 1
+    assert comp_baking_series.points[0].avg_rohlik == 24.0
+    assert comp_baking_series.points[0].avg_csu == 20.0
+    assert comp_baking_series.points[0].avg_bls == 30.0
 
-    alcohol_series = history.get_category_series("alcohol", days=3650)
-    assert len(alcohol_series.points) == 1
-    assert alcohol_series.points[0].avg_csu is None
-    assert alcohol_series.points[0].avg_bls is None
+    comp_alcohol_series = history.get_category_series("alcohol", days=3650, mode="comparison")
+    assert comp_alcohol_series.points == []
+
+    # 2. Generic mode: each source averages over all items it has
+    gen_analytics = history.get_category_analytics(mode="generic")
+    gen_by_cat = {row.category: row for row in gen_analytics.categories}
+    assert gen_by_cat["baking"].avg_rohlik_unit_price == 112.0  # (24 + 200) / 2
+    assert gen_by_cat["baking"].avg_csu_unit_price == 135.0  # (20 + 250) / 2
+    assert gen_by_cat["baking"].avg_bls_unit_price == 30.0
+    assert gen_by_cat["alcohol"].avg_csu_unit_price == 60.0
+
+    gen_baking_series = history.get_category_series("baking", days=3650, mode="generic")
+    assert len(gen_baking_series.points) == 1
+    assert gen_baking_series.points[0].avg_rohlik == 112.0
+    assert gen_baking_series.points[0].avg_csu == 135.0
     history.close()
