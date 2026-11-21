@@ -1,57 +1,105 @@
-from difflib import SequenceMatcher
-from decimal import Decimal
+import logging
+import os
 import re
 import unicodedata
-from typing import List, Optional, Set
+from decimal import Decimal
+from typing import Any, List, Optional, Set, Tuple
+
+import spacy
+from spacy.lang.cs.stop_words import STOP_WORDS as CS_STOP_WORDS
+from spacy.lang.en.stop_words import STOP_WORDS as EN_STOP_WORDS
+
+try:
+    from sentence_transformers import SentenceTransformer, util
+    _HAS_TRANSFORMERS = True
+except ImportError:
+    _HAS_TRANSFORMERS = False
+
 from app.models.enums import PriceAdvantage, StoreType
 from app.models.product import StoreProduct
 from app.models.comparison import MatchedProductPair
 
+logger = logging.getLogger(__name__)
+
+# Standard measurement units to exclude from lemma comparisons
+MEASUREMENT_UNITS: Set[str] = {
+    "kg", "g", "gram", "kilo", "l", "litr", "ml", "ks", "kus", "kusů", "pcs",
+    "balení", "bal", "pack", "cl", "dl",
+}
+
 
 class ProductMatchingService:
-    """Matches corresponding products from Rohlik and Kosik, ranking by normalized unit price."""
+    """Matches and ranks products across supermarkets using spaCy NLP and multilingual embeddings.
+    
+    Replaces brittle heuristic keyword and brand lists with:
+      - spaCy tokenization, normalization, and language-specific stop word removal.
+      - Dictionary lookup and pipeline lemmatization (Czech and English).
+      - Multilingual sentence transformer dense embeddings for cross-lingual semantic similarity.
+    """
 
-    KNOWN_BRANDS: Set[str] = {
-        "madeta", "milko", "olma", "kunin", "pilsner", "urquell", "barilla",
-        "miil", "tatra", "bohemilk", "delacto", "parmareggio", "elle & vire",
-        "dr. halíř", "dr halir", "podestýlková", "schubert", "president",
-    }
+    _nlp_cs: Optional[Any] = None
+    _nlp_en: Optional[Any] = None
+    _embedding_model: Optional[Any] = None
 
-    # Irrelevant item keywords to exclude when searching for pure staples
-    EXCLUSIONS = {
-        "máslo": ["croissant", "těsto", "zelenina", "sušenky", "brioška", "pomazánka s máslem", "příchutí"],
-        "mléko": ["čokoláda", "sušenky", "káva s mlékem", "koktejl"],
-        "vejce": ["těstoviny", "salát s vejci", "pomazánka"],
-        "pivo": ["sklenice", "otvírák", "tričko"],
-        "banán": ["bread", "chléb", "pečivo", "sirup", "kaše", "křupky", "želé", "ice", "sušenky", "tyčinka", "snack", "cocofir", "protein"],
-    }
-
-    STOP_TOKENS: Set[str] = {
-        "1", "2", "3", "4", "5", "6", "8", "10", "12", "ks", "kus", "kusů", "balení",
-        "g", "kg", "kilo", "l", "litr", "ml", "pcs", "bio", "1kg", "250g", "05l", "1l",
-    }
-
-    def __init__(self, min_similarity_threshold: float = 0.40) -> None:
+    def __init__(self, min_similarity_threshold: float = 0.55) -> None:
         self.min_similarity_threshold = min_similarity_threshold
+        self._init_nlp()
+
+    @classmethod
+    def _init_nlp(cls) -> None:
+        """Initialize spaCy pipelines and multilingual embedding model once."""
+        if cls._nlp_cs is None:
+            try:
+                cls._nlp_cs = spacy.blank("cs")
+                cls._nlp_cs.add_pipe("lemmatizer", config={"mode": "lookup"})
+                cls._nlp_cs.initialize()
+            except Exception as e:
+                logger.warning(f"Could not initialize Czech spaCy lemmatizer: {e}")
+                cls._nlp_cs = spacy.blank("cs")
+
+        if cls._nlp_en is None:
+            try:
+                cls._nlp_en = spacy.load("en_core_web_sm")
+            except Exception:
+                cls._nlp_en = spacy.blank("en")
+
+        if cls._embedding_model is None and _HAS_TRANSFORMERS:
+            try:
+                # Use cached local weights to operate seamlessly offline
+                os.environ.setdefault("HF_HUB_OFFLINE", "1")
+                cls._embedding_model = SentenceTransformer(
+                    "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+                    local_files_only=True,
+                )
+            except Exception as e:
+                logger.debug(f"SentenceTransformer offline load fallback: {e}")
+                cls._embedding_model = None
+
+    @classmethod
+    def get_lemmas(cls, text: str, lang: str = "cs") -> Set[str]:
+        """Extract normalized lemmas from text using spaCy, stripping stop words and units."""
+        cls._init_nlp()
+        nlp = cls._nlp_cs if lang == "cs" else cls._nlp_en
+        stops = CS_STOP_WORDS if lang == "cs" else EN_STOP_WORDS
+
+        doc = nlp(text.lower())
+        lemmas: Set[str] = set()
+        for token in doc:
+            if token.is_punct or token.like_num or token.is_space:
+                continue
+            lemma = token.lemma_.strip().lower() if token.lemma_ else token.text.strip().lower()
+            if lemma and lemma not in stops and lemma not in MEASUREMENT_UNITS and len(lemma) > 1:
+                lemmas.add(lemma)
+                norm_lemma = cls._strip_accents(lemma)
+                if norm_lemma != lemma:
+                    lemmas.add(norm_lemma)
+        return lemmas
 
     @staticmethod
     def _strip_accents(text: str) -> str:
         """Remove diacritics for insensitive matching."""
         nfkd = unicodedata.normalize("NFKD", text)
         return "".join(c for c in nfkd if not unicodedata.combining(c))
-
-    def _extract_stems(self, query: str, query_cs: str) -> Set[str]:
-        """Extract core search stems from query strings, ignoring units and quantities."""
-        combined = f"{query} {query_cs}".lower()
-        words = re.findall(r"[a-zA-Zá-žÁ-Ž]+", combined)
-        meaningful = [w for w in words if len(w) > 2 and w not in self.STOP_TOKENS]
-        stems = set()
-        for m in meaningful:
-            norm = self._strip_accents(m)
-            # Use root of at least 3 characters
-            root_len = max(3, len(norm) - 1) if len(norm) > 4 else len(norm)
-            stems.add(norm[:root_len])
-        return stems
 
     def find_best_pair(
         self,
@@ -64,16 +112,16 @@ class ProductMatchingService:
         if not rohlik_candidates and not kosik_candidates:
             return None
 
-        # Clean irrelevant peripheral items
+        # Filter relevant products using spaCy lemmatization and semantic similarity
         r_filtered = self._filter_relevant_products(query_cs, rohlik_candidates, query)
         k_filtered = self._filter_relevant_products(query_cs, kosik_candidates, query)
 
-        # If both became empty due to over-aggressive filtering, fall back to candidates
+        # Fallback to candidates if filtering emptied both lists
         if not r_filtered and not k_filtered:
             r_filtered = rohlik_candidates
             k_filtered = kosik_candidates
 
-        # If only one store has products
+        # If only one store has relevant products
         if not r_filtered and k_filtered:
             k_best = self._get_best_unit_price(k_filtered)
             return MatchedProductPair(
@@ -102,16 +150,12 @@ class ProductMatchingService:
                 match_confidence=1.0,
             )
 
-        # Check if the query specifically mentions a brand
-        is_brand_search = any(b in query.lower() or b in query_cs.lower() for b in self.KNOWN_BRANDS)
+        # 1. Attempt brand/exact product match across supermarkets
+        brand_match = self._find_brand_match(query, query_cs, r_filtered, k_filtered)
+        if brand_match:
+            return brand_match
 
-        if is_brand_search:
-            # Pair matching brand
-            best_pair = self._find_brand_match(query, query_cs, r_filtered, k_filtered)
-            if best_pair:
-                return best_pair
-
-        # Default for generic staples: Pick the best value deal (lowest unit price) from each store
+        # 2. Default for generic staples: Pick the best value deal (lowest unit price) from each store
         r_best = self._get_best_unit_price(r_filtered)
         k_best = self._get_best_unit_price(k_filtered)
 
@@ -127,7 +171,7 @@ class ProductMatchingService:
         confidence: float = 1.0,
     ) -> MatchedProductPair:
         """Compare two products prioritizing normalized unit price (per kg/l), fallback to pack price."""
-        # Ensure confidence is always strictly within [0.0, 1.0]
+        # Ensure confidence is strictly within [0.0, 1.0]
         clamped_confidence = min(1.0, max(0.0, float(confidence)))
 
         # Use unit price (per kg/l) if both have it and share same unit type
@@ -188,32 +232,37 @@ class ProductMatchingService:
         products: List[StoreProduct],
         query: Optional[str] = None,
     ) -> List[StoreProduct]:
-        """Exclude peripheral products (e.g. croissants when searching butter) and irrelevant results."""
-        clean_q = query_cs.lower()
-        exclusion_list: List[str] = []
-        for key, words in self.EXCLUSIONS.items():
-            if key in clean_q or (query and key in query.lower()):
-                exclusion_list.extend(words)
+        """Filter products by NLP relevance to query using lemmatization and multilingual semantic scoring."""
+        if not products:
+            return []
 
-        stems = self._extract_stems(query or "", query_cs)
+        q_lemmas = self.get_lemmas(query_cs, "cs")
+        if query:
+            q_lemmas |= self.get_lemmas(query, "en")
 
         filtered: List[StoreProduct] = []
-        for p in products:
-            p_name_lower = p.name.lower()
-            p_name_norm = self._strip_accents(p_name_lower)
-            p_brand_norm = self._strip_accents(p.brand.lower()) if p.brand else ""
 
-            # Check exclusions
-            if any(excl in p_name_lower for excl in exclusion_list):
+        for p in products:
+            p_lemmas = self.get_lemmas(p.name, "cs")
+            if p.brand:
+                p_lemmas |= self.get_lemmas(p.brand, "cs")
+
+            # Check 1: Direct lemma overlap with search query
+            if bool(q_lemmas & p_lemmas):
+                filtered.append(p)
                 continue
 
-            # If stems exist, product must contain at least one stem in its name or brand
-            if stems:
-                matches_stem = any(s in p_name_norm or (p_brand_norm and s in p_brand_norm) for s in stems)
-                if not matches_stem:
-                    continue
-
-            filtered.append(p)
+            # Check 2: Semantic embedding similarity if available
+            if self._embedding_model is not None:
+                try:
+                    target_query = query_cs or query or ""
+                    embs = self._embedding_model.encode([target_query, p.name], convert_to_tensor=True)
+                    sem_sim = float(util.cos_sim(embs[0], embs[1])[0][0])
+                    if sem_sim >= 0.50:
+                        filtered.append(p)
+                        continue
+                except Exception:
+                    pass
 
         return filtered
 
@@ -237,7 +286,7 @@ class ProductMatchingService:
         r_list: List[StoreProduct],
         k_list: List[StoreProduct],
     ) -> Optional[MatchedProductPair]:
-        """Find identical brand and title match."""
+        """Find matching brand or identical product packaging across stores using semantic scoring."""
         best_score = -1.0
         best_r: Optional[StoreProduct] = None
         best_k: Optional[StoreProduct] = None
@@ -245,40 +294,47 @@ class ProductMatchingService:
         for r in r_list:
             for k in k_list:
                 score = self.compute_similarity(r.name, k.name)
-                if r.brand and k.brand and r.brand.lower() == k.brand.lower():
-                    score += 0.3
+                # Boost if both explicitly declare identical non-empty brand
+                if r.brand and k.brand and r.brand.strip().lower() == k.brand.strip().lower():
+                    score = min(1.0, score + 0.20)
                 if score > best_score:
                     best_score = score
                     best_r = r
                     best_k = k
 
-        if best_r and best_k and best_score >= self.min_similarity_threshold:
-            clamped_score = min(1.0, max(0.0, float(best_score)))
-            return self.compare_products(query, query_cs, best_r, best_k, clamped_score)
+        # Strong semantic threshold for declaring an exact brand/item pair
+        if best_r and best_k and best_score >= max(0.65, self.min_similarity_threshold):
+            return self.compare_products(query, query_cs, best_r, best_k, best_score)
         return None
 
     @classmethod
     def compute_similarity(cls, title_a: str, title_b: str) -> float:
-        """Compute token and sequence similarity between two product names, discounting units/numbers."""
-        norm_a = cls._strip_accents(re.sub(r"[^\w\s]", "", title_a.lower()))
-        norm_b = cls._strip_accents(re.sub(r"[^\w\s]", "", title_b.lower()))
+        """Compute semantic and lexical similarity between two product titles."""
+        cls._init_nlp()
+        lemmas_a = cls.get_lemmas(title_a)
+        lemmas_b = cls.get_lemmas(title_b)
 
-        raw_tokens_a = set(norm_a.split())
-        raw_tokens_b = set(norm_b.split())
+        # Jaccard overlap on lemmatized content tokens (discounting stop words and units)
+        if lemmas_a and lemmas_b:
+            jaccard = len(lemmas_a & lemmas_b) / len(lemmas_a | lemmas_b)
+        else:
+            jaccard = 0.0
 
-        # Filter out standalone numbers, measurement units, and stop words
-        tokens_a = {t for t in raw_tokens_a if t not in cls.STOP_TOKENS and not t.isdigit()}
-        tokens_b = {t for t in raw_tokens_b if t not in cls.STOP_TOKENS and not t.isdigit()}
+        # Semantic embedding cosine similarity using multilingual model
+        if cls._embedding_model is not None:
+            try:
+                embs = cls._embedding_model.encode([title_a, title_b], convert_to_tensor=True)
+                sem_sim = float(util.cos_sim(embs[0], embs[1])[0][0])
+                # Combined metric: 60% multilingual semantic embedding + 40% lemmatized token overlap
+                score = 0.6 * sem_sim + 0.4 * jaccard
+            except Exception:
+                score = jaccard
+        else:
+            # Fallback to lemmatized token Jaccard + sequence matcher ratio
+            from difflib import SequenceMatcher
+            norm_a = cls._strip_accents(title_a.lower())
+            norm_b = cls._strip_accents(title_b.lower())
+            seq_ratio = SequenceMatcher(None, norm_a, norm_b).ratio()
+            score = 0.6 * jaccard + 0.4 * seq_ratio
 
-        # Fallback to raw tokens if all tokens were filtered
-        effective_a = tokens_a or raw_tokens_a
-        effective_b = tokens_b or raw_tokens_b
-
-        if not effective_a or not effective_b:
-            return 0.0
-
-        jaccard = len(effective_a & effective_b) / len(effective_a | effective_b)
-        seq_ratio = SequenceMatcher(None, norm_a, norm_b).ratio()
-
-        score = round(0.6 * jaccard + 0.4 * seq_ratio, 3)
-        return min(1.0, max(0.0, score))
+        return round(min(1.0, max(0.0, float(score))), 3)

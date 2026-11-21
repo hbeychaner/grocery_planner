@@ -44,7 +44,7 @@ def test_confidence_clamping(sample_rohlik_butter: StoreProduct, sample_kosik_bu
     assert pair2.match_confidence == 0.0
 
 
-def test_filter_relevant_products_stemming() -> None:
+def test_filter_relevant_products_nlp() -> None:
     matcher = ProductMatchingService()
     prod_banana = StoreProduct(
         store=StoreType.ROHLIK,
@@ -62,19 +62,19 @@ def test_filter_relevant_products_stemming() -> None:
         in_stock=True,
         url="http://test",
     )
-    prod_bread = StoreProduct(
+    prod_apple = StoreProduct(
         store=StoreType.KOSIK,
         product_id="3",
-        name="Koláčkova pekárna Banana bread bez lepku",
-        price=Decimal("69.90"),
+        name="Červená jablka Gala 1kg",
+        price=Decimal("39.90"),
         in_stock=True,
         url="http://test",
     )
 
-    filtered = matcher._filter_relevant_products("Banány 1kg", [prod_banana, prod_kiwi, prod_bread], query="bananas")
+    filtered = matcher._filter_relevant_products("Banány 1kg", [prod_banana, prod_kiwi, prod_apple], query="bananas")
     assert prod_banana in filtered
-    assert prod_kiwi not in filtered  # Irrelevant stem
-    assert prod_bread not in filtered  # Excluded bakery keyword
+    assert prod_kiwi not in filtered  # Irrelevant item rejected by NLP
+    assert prod_apple not in filtered  # Irrelevant item rejected by NLP
 
 
 def test_similarity_ignores_unit_and_number_overlap() -> None:
