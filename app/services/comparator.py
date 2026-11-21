@@ -77,55 +77,171 @@ class PriceComparisonService:
         return unique
 
     async def compare_single_item(self, query: str) -> ComparisonResponse:
-        """Compare a single grocery item between Rohlik and Kosik."""
+        """Compare a single grocery item between Rohlik and Kosik with nested Langfuse tracing."""
         clean_query = query.strip()
+        monitoring = getattr(self.ollama, "monitoring", None)
+
+        if monitoring is None:
+            return await self._compare_single_item_impl(clean_query)
+
+        with monitoring.trace_observation(
+            name="compare-grocery-item",
+            as_type="chain",
+            input_data={"query": clean_query},
+            flush_on_exit=True,
+        ) as root_span:
+            res = await self._compare_single_item_impl(clean_query, monitoring=monitoring)
+            if root_span is not None:
+                root_span.update(
+                    output={
+                        "query_translated": res.query_translated,
+                        "advantage": res.advantage.value,
+                        "cheapest_store": res.cheapest_store.value if res.cheapest_store else None,
+                        "price_difference": str(res.price_difference),
+                        "voice_summary_en": res.voice_summary_en,
+                    },
+                    metadata={
+                        "category": res.category,
+                        "source_language": res.source_language,
+                        "translations": res.translations,
+                        "labels_by_language": res.labels_by_language,
+                        "rohlik_candidates_count": len(res.rohlik_candidates),
+                        "kosik_candidates_count": len(res.kosik_candidates),
+                    },
+                )
+            return res
+
+    async def _compare_single_item_impl(
+        self, clean_query: str, monitoring: Optional[Any] = None
+    ) -> ComparisonResponse:
         staple = self._staples.get(clean_query.lower())
         category: Optional[str] = None
         labels_by_language: Dict[str, List[str]] = {}
         translations: Dict[str, str] = {}
         source_language: Optional[str] = None
 
-        if staple:
-            rohlik_term = staple.rohlik_query
-            kosik_term = staple.kosik_query
-            translated_term = staple.name_cs
-            category = staple.category
-            translations = {"en": staple.name_en, "cs": staple.name_cs}
-            labels_by_language = staple.labels or {"en": staple.keywords}
-            source_language = "en"
+        if monitoring is not None:
+            with monitoring.trace_observation(
+                name="resolve-query-translation",
+                as_type="retriever",
+                input_data={"query": clean_query, "target_lang": settings.default_catalog_language},
+            ) as tr_span:
+                if staple:
+                    rohlik_term = staple.rohlik_query
+                    kosik_term = staple.kosik_query
+                    translated_term = staple.name_cs
+                    category = staple.category
+                    translations = {"en": staple.name_en, "cs": staple.name_cs}
+                    labels_by_language = staple.labels or {"en": staple.keywords}
+                    source_language = "en"
+                    tr_source = "staple_catalog"
+                else:
+                    t_res = await self.bilingual.translate_query_async(
+                        clean_query, ollama_service=self.ollama
+                    )
+                    translated_term = t_res.primary_term
+                    rohlik_term = translated_term
+                    kosik_term = translated_term
+                    category = t_res.category
+                    translations = t_res.translations
+                    labels_by_language = t_res.labels
+                    source_language = t_res.source_language
+                    tr_source = "sqlite_cache" if t_res.from_cache else "llm_or_dictionary"
+                if tr_span is not None:
+                    tr_span.update(
+                        output={"translated_term": translated_term, "source": tr_source},
+                        metadata={"translations": translations, "category": category},
+                    )
         else:
-            t_res = await self.bilingual.translate_query_async(
-                clean_query, ollama_service=self.ollama
-            )
-            translated_term = t_res.primary_term
-            rohlik_term = translated_term
-            kosik_term = translated_term
-            category = t_res.category
-            translations = t_res.translations
-            labels_by_language = t_res.labels
-            source_language = t_res.source_language
+            if staple:
+                rohlik_term = staple.rohlik_query
+                kosik_term = staple.kosik_query
+                translated_term = staple.name_cs
+                category = staple.category
+                translations = {"en": staple.name_en, "cs": staple.name_cs}
+                labels_by_language = staple.labels or {"en": staple.keywords}
+                source_language = "en"
+            else:
+                t_res = await self.bilingual.translate_query_async(
+                    clean_query, ollama_service=self.ollama
+                )
+                translated_term = t_res.primary_term
+                rohlik_term = translated_term
+                kosik_term = translated_term
+                category = t_res.category
+                translations = t_res.translations
+                labels_by_language = t_res.labels
+                source_language = t_res.source_language
 
         flat_labels = labels_by_language.get(
             settings.default_language,
             labels_by_language.get("en", labels_by_language.get("cs", [])),
         )
 
-        # Fetch more candidates so we can rank by unit price
-        rohlik_task = self.rohlik.search(rohlik_term, limit=10)
-        kosik_task = self.kosik.search(kosik_term, limit=10)
+        # Fetch store candidates concurrently with traced tool spans
+        async def _search_rohlik() -> List[StoreProduct]:
+            if monitoring is None:
+                res = await self.rohlik.search(rohlik_term, limit=10)
+                return res if isinstance(res, list) else []
+            with monitoring.trace_observation(
+                name="search-rohlik-catalog",
+                as_type="tool",
+                input_data={"query": rohlik_term, "limit": 10},
+            ) as span:
+                res = await self.rohlik.search(rohlik_term, limit=10)
+                items = res if isinstance(res, list) else []
+                if span is not None:
+                    span.update(output={"count": len(items), "top": [p.name for p in items[:3]]})
+                return items
 
-        r_products, k_products = await asyncio.gather(
-            rohlik_task, kosik_task, return_exceptions=True
+        async def _search_kosik() -> List[StoreProduct]:
+            if monitoring is None:
+                res = await self.kosik.search(kosik_term, limit=10)
+                return res if isinstance(res, list) else []
+            with monitoring.trace_observation(
+                name="search-kosik-catalog",
+                as_type="tool",
+                input_data={"query": kosik_term, "limit": 10},
+            ) as span:
+                res = await self.kosik.search(kosik_term, limit=10)
+                items = res if isinstance(res, list) else []
+                if span is not None:
+                    span.update(output={"count": len(items), "top": [p.name for p in items[:3]]})
+                return items
+
+        r_results, k_results = await asyncio.gather(
+            _search_rohlik(), _search_kosik(), return_exceptions=True
         )
 
-        r_list: List[StoreProduct] = r_products if isinstance(r_products, list) else []
-        k_list: List[StoreProduct] = k_products if isinstance(k_products, list) else []
+        r_list: List[StoreProduct] = r_results if isinstance(r_results, list) else []
+        k_list: List[StoreProduct] = k_results if isinstance(k_results, list) else []
 
-        best_pair = self.matcher.find_best_pair(clean_query, translated_term, r_list, k_list)
-
-        # Filter relevant products for clean ranked list display
-        r_filtered = self.matcher._filter_relevant_products(translated_term, r_list, clean_query)
-        k_filtered = self.matcher._filter_relevant_products(translated_term, k_list, clean_query)
+        if monitoring is not None:
+            with monitoring.trace_observation(
+                name="match-and-rank-products",
+                as_type="evaluator",
+                input_data={
+                    "query": clean_query,
+                    "query_cs": translated_term,
+                    "rohlik_candidates": len(r_list),
+                    "kosik_candidates": len(k_list),
+                },
+            ) as match_span:
+                best_pair = self.matcher.find_best_pair(clean_query, translated_term, r_list, k_list)
+                r_filtered = self.matcher._filter_relevant_products(translated_term, r_list, clean_query)
+                k_filtered = self.matcher._filter_relevant_products(translated_term, k_list, clean_query)
+                if match_span is not None:
+                    match_span.update(
+                        output={
+                            "matched": best_pair is not None,
+                            "confidence": best_pair.match_confidence if best_pair else 0.0,
+                            "advantage": best_pair.advantage.value if best_pair else "unavailable",
+                        }
+                    )
+        else:
+            best_pair = self.matcher.find_best_pair(clean_query, translated_term, r_list, k_list)
+            r_filtered = self.matcher._filter_relevant_products(translated_term, r_list, clean_query)
+            k_filtered = self.matcher._filter_relevant_products(translated_term, k_list, clean_query)
 
         # If filtering emptied both lists, fall back to raw lists
         if not r_filtered and not k_filtered:

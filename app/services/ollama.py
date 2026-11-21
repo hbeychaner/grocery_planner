@@ -135,11 +135,13 @@ Rules: Keep each language key ({langs_list}) strictly in that language. No weigh
 Return ONLY JSON:
 {{"source_language":"<iso>","translations":{{{translations_example}}},"category":"<slug>","labels":{{{labels_example}}},"synonyms":{{{synonyms_example}}},"is_compound":true}}"""
 
+        model_params = {"num_predict": 256, "temperature": 0.1, "think": self.think}
         with self.monitoring.trace_generation(
-            name="ollama.analyze_query",
+            name="translate-and-classify-query",
             model=self.model,
-            input_data={"query": query, "target_languages": langs},
-            metadata={"think": self.think},
+            input_data=[{"role": "user", "content": prompt}],
+            metadata={"query": query, "target_languages": langs},
+            model_parameters=model_params,
         ) as span:
             try:
                 client = await self._get_client()
@@ -169,7 +171,8 @@ Return ONLY JSON:
                     if analysis.translations:
                         if span is not None:
                             span.update(
-                                output=analysis.model_dump(),
+                                output={"role": "assistant", "content": raw_response},
+                                metadata={"parsed": analysis.model_dump()},
                                 usage_details={
                                     "input": int(body.get("prompt_eval_count", 0)),
                                     "output": int(body.get("eval_count", 0)),
@@ -197,11 +200,13 @@ Select only the indices of products that directly match the requested item.
 Exclude unrelated fallback suggestions from different categories.
 Return ONLY raw valid JSON: {{"relevant_indices": [0, 1]}}"""
 
+        model_params = {"num_predict": 128, "temperature": 0.1, "think": self.think}
         with self.monitoring.trace_generation(
-            name="ollama.filter_relevant_indices",
+            name="filter-relevant-candidates",
             model=self.model,
-            input_data={"query": query, "titles": titles},
-            metadata={"think": self.think},
+            input_data=[{"role": "user", "content": prompt}],
+            metadata={"query": query, "candidate_count": len(titles)},
+            model_parameters=model_params,
         ) as span:
             try:
                 client = await self._get_client()
@@ -225,7 +230,14 @@ Return ONLY raw valid JSON: {{"relevant_indices": [0, 1]}}"""
                             if isinstance(i, (int, str)) and str(i).isdigit() and int(i) < len(titles)
                         ]
                         if span is not None:
-                            span.update(output={"relevant_indices": valid})
+                            span.update(
+                                output={"role": "assistant", "content": raw_response},
+                                metadata={"relevant_indices": valid},
+                                usage_details={
+                                    "input": int(body.get("prompt_eval_count", 0)),
+                                    "output": int(body.get("eval_count", 0)),
+                                },
+                            )
                         return valid
             except Exception as exc:
                 logger.debug(f"Ollama candidate filtering skipped: {exc}")
