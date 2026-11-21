@@ -1,3 +1,4 @@
+from app.core.config import settings
 from app.clients.base import BaseStoreClient
 from app.clients.rohlik import RohlikStoreClient
 from app.clients.kosik import KosikStoreClient
@@ -30,7 +31,22 @@ _comparator_service = PriceComparisonService(
     ollama_service=_ollama_service,
 )
 _price_history_service = PriceHistoryService()
+_price_history_service.seed_from_yaml(settings.tracked_groceries_config_path)
 _price_history_service.seed_default_items(BilingualQueryService.DICTIONARY)
+
+# Pre-warm translation cache with all tracked groceries so weekly runs avoid LLM latency
+if settings.tracked_groceries_config_path.exists():
+    import yaml as _yaml
+
+    with open(settings.tracked_groceries_config_path, "r", encoding="utf-8") as _f:
+        _tracked_raw = _yaml.safe_load(_f) or {}
+    _tracked_dict = {
+        e["query"]: [e["query_cs"]]
+        for e in _tracked_raw.get("groceries", [])
+        if e.get("query") and e.get("query_cs")
+    }
+    _translation_cache.seed_from_dictionary(_tracked_dict)
+
 _tracker_runner = PriceTrackerRunner(
     comparator=_comparator_service,
     history=_price_history_service,

@@ -51,6 +51,7 @@ class AppSettings(BaseSettings):
     # File paths
     base_dir: Path = Path(__file__).resolve().parent.parent.parent
     staples_config_path: Path = base_dir / "config" / "staples.yaml"
+    tracked_groceries_config_path: Path = base_dir / "config" / "tracked_groceries.yaml"
     translation_db_path: Path = Field(
         default=base_dir / "data" / "translations.db",
         alias="TRANSLATION_DB_PATH",

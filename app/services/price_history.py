@@ -125,6 +125,43 @@ class PriceHistoryService:
     def _normalize_query(query: str) -> str:
         return " ".join(query.strip().lower().split())
 
+    def seed_from_yaml(self, yaml_path: Path) -> int:
+        """Idempotently seed tracked groceries from config/tracked_groceries.yaml."""
+        if not yaml_path.exists():
+            return 0
+
+        import yaml
+
+        with open(yaml_path, "r", encoding="utf-8") as f:
+            raw = yaml.safe_load(f) or {}
+
+        entries = raw.get("groceries", [])
+        if not entries:
+            return 0
+
+        now = datetime.now(timezone.utc)
+        values = [
+            {
+                "query": self._normalize_query(entry["query"]),
+                "query_cs": entry.get("query_cs"),
+                "category": entry.get("category"),
+                "active": True,
+                "created_at": now,
+            }
+            for entry in entries
+            if entry.get("query")
+        ]
+        if not values:
+            return 0
+
+        with Session(self.engine) as session:
+            stmt = sqlite_insert(TrackedItemRecord).values(values).on_conflict_do_nothing(
+                index_elements=["query"]
+            )
+            res = session.execute(stmt)
+            session.commit()
+            return res.rowcount or 0
+
     def seed_default_items(self, items: Dict[str, List[str]]) -> None:
         """Seed initial watchlist from bilingual dictionary if tracked_items is empty."""
         with Session(self.engine) as session:

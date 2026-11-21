@@ -1,0 +1,218 @@
+# Comprehensive weekly grocery tracking watchlist (English -> Czech catalog search term + category)
+# Used to seed tracked_items in price_history.db and pre-warm translations.db
+
+groceries:
+  # Dairy & Milk Variants
+  - { query: "whole milk", query_cs: "plnotučné mléko", category: "dairy" }
+  - { query: "semi-skimmed milk", query_cs: "polotučné mléko", category: "dairy" }
+  - { query: "skimmed milk", query_cs: "odtučněné mléko", category: "dairy" }
+  - { query: "lactose free milk", query_cs: "bezlaktózové mléko", category: "dairy" }
+  - { query: "oat milk", query_cs: "ovesné mléko", category: "dairy" }
+  - { query: "almond milk", query_cs: "mandlové mléko", category: "dairy" }
+  - { query: "soy milk", query_cs: "sójové mléko", category: "dairy" }
+  - { query: "coconut milk", query_cs: "kokosové mléko", category: "dairy" }
+  - { query: "rice milk", query_cs: "rýžové mléko", category: "dairy" }
+  - { query: "kefir", query_cs: "kefír", category: "dairy" }
+  - { query: "buttermilk", query_cs: "podmáslí", category: "dairy" }
+  - { query: "heavy cream", query_cs: "smetana ke šlehání", category: "dairy" }
+  - { query: "sour cream", query_cs: "zakysaná smetana", category: "dairy" }
+  - { query: "cooking cream", query_cs: "smetana na vaření", category: "dairy" }
+  - { query: "white yogurt", query_cs: "bílý jogurt", category: "dairy" }
+  - { query: "greek yogurt", query_cs: "řecký jogurt", category: "dairy" }
+  - { query: "skyr", query_cs: "skyr", category: "dairy" }
+  - { query: "quark", query_cs: "tvaroh", category: "dairy" }
+  - { query: "cottage cheese", query_cs: "cottage sýr", category: "dairy" }
+  - { query: "eidam cheese", query_cs: "eidam", category: "dairy" }
+  - { query: "gouda", query_cs: "gouda", category: "dairy" }
+  - { query: "cheddar", query_cs: "čedar", category: "dairy" }
+  - { query: "mozzarella", query_cs: "mozzarella", category: "dairy" }
+  - { query: "parmesan", query_cs: "parmazán", category: "dairy" }
+  - { query: "brie", query_cs: "brie", category: "dairy" }
+  - { query: "feta cheese", query_cs: "feta", category: "dairy" }
+  - { query: "halloumi", query_cs: "halloumi", category: "dairy" }
+  - { query: "cream cheese", query_cs: "lučina", category: "dairy" }
+  - { query: "eggs", query_cs: "vejce", category: "dairy_eggs" }
+  - { query: "free range eggs", query_cs: "vejce z volného chovu", category: "dairy_eggs" }
+
+  # Butter & Margarine
+  - { query: "butter", query_cs: "máslo", category: "dairy" }
+  - { query: "ghee", query_cs: "ghí", category: "dairy" }
+  - { query: "margarine", query_cs: "margarín", category: "dairy" }
+  - { query: "rama margarine", query_cs: "rama", category: "dairy" }
+  - { query: "flora margarine", query_cs: "flora", category: "dairy" }
+  - { query: "baking margarine", query_cs: "hera", category: "baking" }
+
+  # Fruits
+  - { query: "apples", query_cs: "jablka", category: "produce" }
+  - { query: "bananas", query_cs: "banány", category: "produce" }
+  - { query: "oranges", query_cs: "pomeranče", category: "produce" }
+  - { query: "lemons", query_cs: "citrony", category: "produce" }
+  - { query: "limes", query_cs: "limetky", category: "produce" }
+  - { query: "mandarins", query_cs: "mandarinky", category: "produce" }
+  - { query: "grapefruit", query_cs: "grapefruit", category: "produce" }
+  - { query: "pears", query_cs: "hrušky", category: "produce" }
+  - { query: "grapes", query_cs: "hroznové víno", category: "produce" }
+  - { query: "strawberries", query_cs: "jahody", category: "produce" }
+  - { query: "blueberries", query_cs: "borůvky", category: "produce" }
+  - { query: "raspberries", query_cs: "maliny", category: "produce" }
+  - { query: "blackberries", query_cs: "ostružiny", category: "produce" }
+  - { query: "kiwi", query_cs: "kiwi", category: "produce" }
+  - { query: "mango", query_cs: "mango", category: "produce" }
+  - { query: "pineapple", query_cs: "ananas", category: "produce" }
+  - { query: "avocado", query_cs: "avokádo", category: "produce" }
+  - { query: "peaches", query_cs: "broskve", category: "produce" }
+  - { query: "plums", query_cs: "švestky", category: "produce" }
+  - { query: "watermelon", query_cs: "vodní meloun", category: "produce" }
+  - { query: "pomegranate", query_cs: "granátové jablko", category: "produce" }
+
+  # Vegetables
+  - { query: "potatoes", query_cs: "brambory", category: "produce" }
+  - { query: "sweet potatoes", query_cs: "batáty", category: "produce" }
+  - { query: "onions", query_cs: "cibule", category: "produce" }
+  - { query: "red onions", query_cs: "červená cibule", category: "produce" }
+  - { query: "spring onions", query_cs: "jarní cibulka", category: "produce" }
+  - { query: "garlic", query_cs: "česnek", category: "produce" }
+  - { query: "tomatoes", query_cs: "rajčata", category: "produce" }
+  - { query: "cherry tomatoes", query_cs: "cherry rajčata", category: "produce" }
+  - { query: "cucumber", query_cs: "okurka", category: "produce" }
+  - { query: "carrots", query_cs: "mrkev", category: "produce" }
+  - { query: "bell pepper", query_cs: "paprika", category: "produce" }
+  - { query: "zucchini", query_cs: "cuketa", category: "produce" }
+  - { query: "eggplant", query_cs: "lilek", category: "produce" }
+  - { query: "broccoli", query_cs: "brokolice", category: "produce" }
+  - { query: "cauliflower", query_cs: "květák", category: "produce" }
+  - { query: "spinach", query_cs: "špenát", category: "produce" }
+  - { query: "iceberg lettuce", query_cs: "ledový salát", category: "produce" }
+  - { query: "arugula", query_cs: "rukola", category: "produce" }
+  - { query: "cabbage", query_cs: "zelí", category: "produce" }
+  - { query: "red cabbage", query_cs: "červené zelí", category: "produce" }
+  - { query: "leek", query_cs: "pórek", category: "produce" }
+  - { query: "celery", query_cs: "celer", category: "produce" }
+  - { query: "radish", query_cs: "ředkvičky", category: "produce" }
+  - { query: "mushrooms", query_cs: "žampiony", category: "produce" }
+  - { query: "ginger", query_cs: "zázvor", category: "produce" }
+  - { query: "green beans", query_cs: "zelené fazolky", category: "produce" }
+
+  # Grains, Rice, Pasta & Legumes
+  - { query: "basmati rice", query_cs: "basmati rýže", category: "pantry" }
+  - { query: "jasmine rice", query_cs: "jasmínová rýže", category: "pantry" }
+  - { query: "arborio rice", query_cs: "rýže arborio", category: "pantry" }
+  - { query: "brown rice", query_cs: "hnědá rýže", category: "pantry" }
+  - { query: "parboiled rice", query_cs: "rýže parboiled", category: "pantry" }
+  - { query: "sushi rice", query_cs: "rýže na sushi", category: "pantry" }
+  - { query: "oats", query_cs: "ovesné vločky", category: "pantry" }
+  - { query: "quinoa", query_cs: "quinoa", category: "pantry" }
+  - { query: "bulgur", query_cs: "bulgur", category: "pantry" }
+  - { query: "couscous", query_cs: "kuskus", category: "pantry" }
+  - { query: "buckwheat", query_cs: "pohanka", category: "pantry" }
+  - { query: "millet", query_cs: "jáhly", category: "pantry" }
+  - { query: "barley", query_cs: "kroupy", category: "pantry" }
+  - { query: "lentils", query_cs: "čočka", category: "pantry" }
+  - { query: "red lentils", query_cs: "červená čočka", category: "pantry" }
+  - { query: "chickpeas", query_cs: "cizrna", category: "pantry" }
+  - { query: "kidney beans", query_cs: "červené fazole", category: "pantry" }
+  - { query: "spaghetti", query_cs: "špagety", category: "pantry" }
+  - { query: "penne", query_cs: "penne", category: "pantry" }
+  - { query: "fusilli", query_cs: "fusilli", category: "pantry" }
+  - { query: "gnocchi", query_cs: "gnocchi", category: "pantry" }
+
+  # Baking Goods
+  - { query: "plain flour", query_cs: "hladká mouka", category: "baking" }
+  - { query: "semi-coarse flour", query_cs: "polohrubá mouka", category: "baking" }
+  - { query: "coarse flour", query_cs: "hrubá mouka", category: "baking" }
+  - { query: "whole wheat flour", query_cs: "celozrnná mouka", category: "baking" }
+  - { query: "almond flour", query_cs: "mandlová mouka", category: "baking" }
+  - { query: "rye flour", query_cs: "žitná mouka", category: "baking" }
+  - { query: "sugar", query_cs: "cukr krupice", category: "baking" }
+  - { query: "powdered sugar", query_cs: "cukr moučka", category: "baking" }
+  - { query: "brown sugar", query_cs: "třtinový cukr", category: "baking" }
+  - { query: "vanilla sugar", query_cs: "vanilkový cukr", category: "baking" }
+  - { query: "baking powder", query_cs: "kypřící prášek", category: "baking" }
+  - { query: "dry yeast", query_cs: "sušené droždí", category: "baking" }
+  - { query: "fresh yeast", query_cs: "čerstvé droždí", category: "baking" }
+  - { query: "baking soda", query_cs: "jedlá soda", category: "baking" }
+  - { query: "cocoa powder", query_cs: "kakao", category: "baking" }
+  - { query: "cornstarch", query_cs: "kukuřičný škrob", category: "baking" }
+  - { query: "breadcrumbs", query_cs: "strouhanka", category: "baking" }
+  - { query: "honey", query_cs: "med", category: "baking" }
+  - { query: "maple syrup", query_cs: "javorový sirup", category: "baking" }
+
+  # Spices & Seasonings
+  - { query: "salt", query_cs: "sůl", category: "spices" }
+  - { query: "sea salt", query_cs: "mořská sůl", category: "spices" }
+  - { query: "black pepper", query_cs: "černý pepř", category: "spices" }
+  - { query: "sweet paprika", query_cs: "sladká paprika", category: "spices" }
+  - { query: "smoked paprika", query_cs: "uzená paprika", category: "spices" }
+  - { query: "cumin", query_cs: "římský kmín", category: "spices" }
+  - { query: "caraway", query_cs: "kmín", category: "spices" }
+  - { query: "oregano", query_cs: "oregano", category: "spices" }
+  - { query: "dried basil", query_cs: "sušená bazalka", category: "spices" }
+  - { query: "thyme", query_cs: "tymián", category: "spices" }
+  - { query: "rosemary", query_cs: "rozmarýn", category: "spices" }
+  - { query: "bay leaf", query_cs: "bobkový list", category: "spices" }
+  - { query: "cinnamon", query_cs: "skořice", category: "spices" }
+  - { query: "nutmeg", query_cs: "muškátový oříšek", category: "spices" }
+  - { query: "turmeric", query_cs: "kurkuma", category: "spices" }
+  - { query: "curry powder", query_cs: "kari koření", category: "spices" }
+  - { query: "chili flakes", query_cs: "chilli vločky", category: "spices" }
+  - { query: "garlic powder", query_cs: "sušený česnek", category: "spices" }
+  - { query: "cardamom", query_cs: "kardamom", category: "spices" }
+  - { query: "cloves", query_cs: "hřebíček", category: "spices" }
+
+  # Bakery
+  - { query: "bread", query_cs: "chléb", category: "bakery" }
+  - { query: "sourdough bread", query_cs: "kváskový chléb", category: "bakery" }
+  - { query: "toast bread", query_cs: "toustový chléb", category: "bakery" }
+  - { query: "baguette", query_cs: "bageta", category: "bakery" }
+  - { query: "roll", query_cs: "rohlík", category: "bakery" }
+  - { query: "croissant", query_cs: "croissant", category: "bakery" }
+  - { query: "tortilla wraps", query_cs: "tortilla", category: "bakery" }
+
+  # Meat & Seafood
+  - { query: "chicken breast", query_cs: "kuřecí prsa", category: "meat" }
+  - { query: "chicken thighs", query_cs: "kuřecí stehna", category: "meat" }
+  - { query: "turkey breast", query_cs: "krůtí prsa", category: "meat" }
+  - { query: "minced beef", query_cs: "mleté hovězí maso", category: "meat" }
+  - { query: "pork tenderloin", query_cs: "vepřová panenka", category: "meat" }
+  - { query: "bacon", query_cs: "slanina", category: "meat" }
+  - { query: "ham", query_cs: "šunka", category: "meat" }
+  - { query: "salmon", query_cs: "losos", category: "seafood" }
+  - { query: "cod", query_cs: "treska", category: "seafood" }
+  - { query: "canned tuna", query_cs: "tuňák v konzervě", category: "seafood" }
+  - { query: "shrimp", query_cs: "krevety", category: "seafood" }
+
+  # Desserts & Sweets
+  - { query: "ice cream", query_cs: "zmrzlina", category: "desserts" }
+  - { query: "dark chocolate", query_cs: "hořká čokoláda", category: "desserts" }
+  - { query: "milk chocolate", query_cs: "mléčná čokoláda", category: "desserts" }
+  - { query: "butter cookies", query_cs: "máslové sušenky", category: "desserts" }
+  - { query: "pudding", query_cs: "pudink", category: "desserts" }
+  - { query: "tiramisu", query_cs: "tiramisu", category: "desserts" }
+  - { query: "strawberry jam", query_cs: "jahodový džem", category: "desserts" }
+  - { query: "peanut butter", query_cs: "arašídové máslo", category: "desserts" }
+  - { query: "nutella", query_cs: "nutella", category: "desserts" }
+
+  # Oils & Pantry Condiments
+  - { query: "olive oil", query_cs: "olivový olej", category: "pantry" }
+  - { query: "sunflower oil", query_cs: "slunečnicový olej", category: "pantry" }
+  - { query: "rapeseed oil", query_cs: "řepkový olej", category: "pantry" }
+  - { query: "coconut oil", query_cs: "kokosový olej", category: "pantry" }
+  - { query: "balsamic vinegar", query_cs: "balzamikový ocet", category: "pantry" }
+  - { query: "apple cider vinegar", query_cs: "jablečný ocet", category: "pantry" }
+  - { query: "soy sauce", query_cs: "sójová omáčka", category: "pantry" }
+  - { query: "canned tomatoes", query_cs: "loupaná rajčata", category: "pantry" }
+  - { query: "tomato paste", query_cs: "rajčatový protlak", category: "pantry" }
+  - { query: "ketchup", query_cs: "kečup", category: "pantry" }
+  - { query: "mustard", query_cs: "hořčice", category: "pantry" }
+  - { query: "mayonnaise", query_cs: "majonéza", category: "pantry" }
+
+  # Beverages
+  - { query: "still water", query_cs: "neperlivá voda", category: "beverages" }
+  - { query: "sparkling water", query_cs: "perlivá voda", category: "beverages" }
+  - { query: "coffee beans", query_cs: "zrnková káva", category: "beverages" }
+  - { query: "ground coffee", query_cs: "mletá káva", category: "beverages" }
+  - { query: "black tea", query_cs: "černý čaj", category: "beverages" }
+  - { query: "green tea", query_cs: "zelený čaj", category: "beverages" }
+  - { query: "orange juice", query_cs: "pomerančový džus", category: "beverages" }
+  - { query: "apple juice", query_cs: "jablečný džus", category: "beverages" }
+  - { query: "pilsner urquell", query_cs: "pilsner urquell", category: "beverages" }
