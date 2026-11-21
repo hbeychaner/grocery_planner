@@ -30,7 +30,7 @@ class MonitoringService:
                 self._client = Langfuse(
                     public_key=self.public_key,
                     secret_key=self.secret_key,
-                    host=self.host,
+                    base_url=self.host,
                     environment=settings.environment,
                     tracing_enabled=True,
                 )
@@ -70,6 +70,8 @@ class MonitoringService:
         except Exception as exc:
             logger.debug(f"Langfuse generation trace skipped: {exc}")
             yield None
+        finally:
+            self.flush()
 
     @contextmanager
     def trace_span(
