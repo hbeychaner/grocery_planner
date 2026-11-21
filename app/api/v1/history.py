@@ -2,7 +2,8 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from app.api.deps import get_price_history_service, get_tracker_runner
+from app.api.deps import get_csu_service, get_price_history_service, get_tracker_runner
+from app.services.csu_client import CsuIngestResult, CsuPriceIngestionService
 from app.services.price_history import (
     CategoryAnalyticsResponse,
     CategoryHistorySeries,
@@ -97,3 +98,11 @@ async def trigger_price_check(
 ) -> TrackerRunResult:
     """Run an on-demand price-check sweep across tracked grocery items."""
     return await runner.run(limit=limit)
+
+
+@router.post("/ingest-csu", response_model=CsuIngestResult)
+async def ingest_csu_history(
+    csu: CsuPriceIngestionService = Depends(get_csu_service),
+) -> CsuIngestResult:
+    """Fetch and pair historical monthly Czech national averages from ČSÚ DataStat API."""
+    return await csu.ingest_all()

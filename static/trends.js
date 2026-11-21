@@ -7,6 +7,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const addItemForm = document.getElementById("add-item-form");
   const newItemInput = document.getElementById("new-item-input");
   const btnRunCheck = document.getElementById("btn-run-check");
+  const btnSyncCsu = document.getElementById("btn-sync-csu");
   const runStatus = document.getElementById("run-status");
   const chartTitle = document.getElementById("chart-title");
   const chartSubtitle = document.getElementById("chart-subtitle");
@@ -78,6 +79,7 @@ document.addEventListener("DOMContentLoaded", () => {
         <span class="unit-pill">Rohlík: ${fmt(meta.avg_rohlik_unit_price)}</span>
         <span class="unit-pill">Košík: ${fmt(meta.avg_kosik_unit_price)}</span>
         <span class="unit-pill" style="background:#dcfce7; color:#166534;">BIO: ${fmt(meta.avg_bio_unit_price)}</span>
+        <span class="unit-pill" style="background:#f1f5f9; color:#334155;">ČSÚ Avg: ${fmt(meta.avg_csu_unit_price)}</span>
         <span class="unit-pill">WoW: <strong>${wow}</strong></span>
       `;
     }
@@ -122,6 +124,14 @@ document.addEventListener("DOMContentLoaded", () => {
             data: points.map(p => p.avg_bio),
             borderColor: "#16a34a",
             borderDash: [5, 5],
+            tension: 0.25,
+            spanGaps: true,
+          },
+          {
+            label: "Czech National Avg (ČSÚ)",
+            data: points.map(p => p.avg_csu),
+            borderColor: "#64748b",
+            borderDash: [2, 3],
             tension: 0.25,
             spanGaps: true,
           },
@@ -216,18 +226,21 @@ document.addEventListener("DOMContentLoaded", () => {
     const kosikReg = data.kosik_series || [];
     const rohlikBio = data.rohlik_bio_series || [];
     const kosikBio = data.kosik_bio_series || [];
+    const csuSeries = data.csu_series || [];
 
     const timestamps = Array.from(new Set([
       ...rohlikReg.map(p => p.recorded_at),
       ...kosikReg.map(p => p.recorded_at),
       ...rohlikBio.map(p => p.recorded_at),
       ...kosikBio.map(p => p.recorded_at),
+      ...csuSeries.map(p => p.recorded_at),
     ])).sort();
 
     const rMap = new Map(rohlikReg.map(p => [p.recorded_at, p.unit_price]));
     const kMap = new Map(kosikReg.map(p => [p.recorded_at, p.unit_price]));
     const rBioMap = new Map(rohlikBio.map(p => [p.recorded_at, p.unit_price]));
     const kBioMap = new Map(kosikBio.map(p => [p.recorded_at, p.unit_price]));
+    const csuMap = new Map(csuSeries.map(p => [p.recorded_at, p.unit_price]));
 
     if (priceChart) {
       priceChart.destroy();
@@ -274,6 +287,17 @@ document.addEventListener("DOMContentLoaded", () => {
         spanGaps: true,
       });
     }
+    if (csuSeries.length > 0) {
+      datasets.push({
+        label: `Czech National Avg ČSÚ (CZK/${unitLabel})`,
+        data: timestamps.map(t => csuMap.has(t) ? csuMap.get(t) : null),
+        borderColor: "#64748b",
+        backgroundColor: "rgba(100, 116, 139, 0.12)",
+        borderDash: [2, 3],
+        tension: 0.25,
+        spanGaps: true,
+      });
+    }
 
     priceChart = new Chart(chartCanvas, {
       type: "line",
@@ -301,6 +325,7 @@ document.addEventListener("DOMContentLoaded", () => {
       ...(data.kosik_series || []).map(p => ({ ...p, storeLabel: "Košík" })),
       ...(data.rohlik_bio_series || []).map(p => ({ ...p, storeLabel: "Rohlík" })),
       ...(data.kosik_bio_series || []).map(p => ({ ...p, storeLabel: "Košík" })),
+      ...(data.csu_series || []).map(p => ({ ...p, storeLabel: "ČSÚ Avg" })),
     ].sort((a, b) => b.recorded_at.localeCompare(a.recorded_at));
 
     if (combined.length === 0) {
@@ -341,6 +366,24 @@ document.addEventListener("DOMContentLoaded", () => {
     newItemInput.value = "";
     selectedQuery = q.toLowerCase();
     await loadWatchlist();
+  });
+
+  btnSyncCsu.addEventListener("click", async () => {
+    btnSyncCsu.disabled = true;
+    btnSyncCsu.textContent = "⏳ Syncing ČSÚ...";
+    runStatus.classList.remove("hidden");
+    runStatus.textContent = "Fetching historical Czech averages from ČSÚ DataStat API...";
+    try {
+      const resp = await fetch("/api/v1/history/ingest-csu", { method: "POST" });
+      const res = await resp.json();
+      runStatus.textContent = `Synced ČSÚ history: ${res.csu_items_matched} items matched, ${res.snapshots_inserted} monthly snapshots loaded.`;
+      await loadWatchlist();
+    } catch (err) {
+      runStatus.textContent = `ČSÚ sync failed: ${err.message}`;
+    } finally {
+      btnSyncCsu.disabled = false;
+      btnSyncCsu.textContent = "⬇ Sync ČSÚ History";
+    }
   });
 
   btnRunCheck.addEventListener("click", async () => {

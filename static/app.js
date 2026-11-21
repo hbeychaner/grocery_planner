@@ -6,6 +6,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const winnerBanner = document.getElementById("winner-banner");
   const rohlikContent = document.getElementById("rohlik-content");
   const kosikContent = document.getElementById("kosik-content");
+  const kupiContent = document.getElementById("kupi-content");
   const stapleChips = document.querySelectorAll(".chip");
 
   // Perform price comparison
@@ -23,6 +24,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const data = await response.json();
       renderResults(data);
+
+      // Fetch Kupi.cz supermarket deals in parallel without blocking main UI
+      fetch(`/api/v1/compare/kupi?q=${encodeURIComponent(query)}`)
+        .then(r => r.ok ? r.json() : [])
+        .then(renderKupiDeals)
+        .catch(() => renderKupiDeals([]));
     } catch (err) {
       alert(`Error comparing prices: ${err.message}`);
     } finally {
@@ -71,6 +78,28 @@ document.addEventListener("DOMContentLoaded", () => {
 
     renderRankedList(rohlikContent, rohlikList, "Rohlík", rohlikBestId);
     renderRankedList(kosikContent, kosikList, "Košík", kosikBestId);
+  }
+
+  function renderKupiDeals(deals) {
+    if (!kupiContent) return;
+    if (!deals || deals.length === 0) {
+      kupiContent.innerHTML = `<p style="color: #94a3b8; font-size: 0.9rem;">No active Kupi.cz leaflet promotions found for this item.</p>`;
+      return;
+    }
+    kupiContent.innerHTML = deals.map(d => {
+      const unitTxt = d.unit_price ? `${Number(d.unit_price).toFixed(2)} CZK / ${d.unit_type}` : "";
+      return `
+        <div style="border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; background: #f8fafc;">
+          <div style="font-size: 0.78rem; font-weight: 700; color: #0f172a; text-transform: uppercase;">${d.store}</div>
+          <div style="font-weight: 600; margin: 4px 0; font-size: 0.92rem;">${d.product_name}</div>
+          <div style="display: flex; justify-content: space-between; align-items: baseline;">
+            <span style="font-weight: 700; color: #16a34a;">${Number(d.price).toFixed(2)} CZK</span>
+            <span style="font-size: 0.8rem; color: #64748b;">${unitTxt}</span>
+          </div>
+          <a href="${d.url}" target="_blank" class="product-link" style="display:inline-block; margin-top:6px; font-size:0.8rem;">View deal &rarr;</a>
+        </div>
+      `;
+    }).join("");
   }
 
   function renderRankedList(container, products, storeName, bestId) {

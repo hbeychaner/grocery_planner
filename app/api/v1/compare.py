@@ -1,6 +1,7 @@
-from typing import Optional
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
-from app.api.deps import get_comparison_service
+from app.api.deps import get_comparison_service, get_kupi_client
+from app.clients.kupi import KupiClient, KupiDeal
 from app.models.comparison import (
     BasketComparisonRequest,
     BasketComparisonResponse,
@@ -36,3 +37,14 @@ async def compare_basket(
         return result
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Basket comparison failed: {str(exc)}")
+
+
+@router.get("/kupi", response_model=List[KupiDeal])
+async def search_kupi_deals(
+    q: str = Query(..., min_length=1, description="Product query to look up across Tesco, Lidl, Penny, Kaufland, Billa, Albert"),
+    comparator: PriceComparisonService = Depends(get_comparison_service),
+    kupi: KupiClient = Depends(get_kupi_client),
+) -> List[KupiDeal]:
+    """Fetch active supermarket promotional deals from Kupi.cz."""
+    t_res = await comparator.bilingual.translate_query_async(q, ollama_service=comparator.ollama)
+    return await kupi.search_deals(t_res.primary_term, limit=12)

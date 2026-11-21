@@ -2,8 +2,10 @@ from app.core.config import settings
 from app.clients.base import BaseStoreClient
 from app.clients.rohlik import RohlikStoreClient
 from app.clients.kosik import KosikStoreClient
+from app.clients.kupi import KupiClient
 from app.services.bilingual import BilingualQueryService
 from app.services.comparator import PriceComparisonService
+from app.services.csu_client import CsuPriceIngestionService
 from app.services.matcher import ProductMatchingService
 from app.services.monitoring import MonitoringService
 from app.services.ollama import OllamaService
@@ -16,6 +18,7 @@ from app.services.voice_formatter import VoiceResponseFormatter
 # Singleton services for lifetime of app
 _rohlik_client = RohlikStoreClient()
 _kosik_client = KosikStoreClient()
+_kupi_client = KupiClient()
 _monitoring_service = MonitoringService()
 _translation_cache = TranslationCacheService()
 _bilingual_service = BilingualQueryService(cache_service=_translation_cache)
@@ -50,6 +53,10 @@ if settings.tracked_groceries_config_path.exists():
 _tracker_runner = PriceTrackerRunner(
     comparator=_comparator_service,
     history=_price_history_service,
+)
+_csu_service = CsuPriceIngestionService(
+    history=_price_history_service,
+    matcher=_matcher_service,
 )
 
 
@@ -91,3 +98,13 @@ def get_price_history_service() -> PriceHistoryService:
 def get_tracker_runner() -> PriceTrackerRunner:
     """Dependency provider for PriceTrackerRunner."""
     return _tracker_runner
+
+
+def get_kupi_client() -> KupiClient:
+    """Dependency provider for KupiClient."""
+    return _kupi_client
+
+
+def get_csu_service() -> CsuPriceIngestionService:
+    """Dependency provider for CsuPriceIngestionService."""
+    return _csu_service

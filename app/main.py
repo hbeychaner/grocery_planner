@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.deps import (
     get_kosik_client,
+    get_kupi_client,
     get_monitoring_service,
     get_ollama_service,
     get_price_history_service,
@@ -24,12 +25,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Cleanup clients on shutdown
     rohlik = get_rohlik_client()
     kosik = get_kosik_client()
+    kupi = get_kupi_client()
     ollama = get_ollama_service()
     monitoring = get_monitoring_service()
     cache = get_translation_cache()
     price_history = get_price_history_service()
     await rohlik.close()
     await kosik.close()
+    await kupi.close()
     await ollama.close()
     cache.close()
     price_history.close()
