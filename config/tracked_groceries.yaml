@@ -7,11 +7,11 @@ groceries:
   - { query: "semi-skimmed milk", query_cs: "polotučné mléko", category: "dairy" }
   - { query: "skimmed milk", query_cs: "odtučněné mléko", category: "dairy" }
   - { query: "lactose free milk", query_cs: "bezlaktózové mléko", category: "dairy" }
-  - { query: "oat milk", query_cs: "ovesné mléko", category: "dairy" }
-  - { query: "almond milk", query_cs: "mandlové mléko", category: "dairy" }
-  - { query: "soy milk", query_cs: "sójové mléko", category: "dairy" }
-  - { query: "coconut milk", query_cs: "kokosové mléko", category: "dairy" }
-  - { query: "rice milk", query_cs: "rýžové mléko", category: "dairy" }
+  - { query: "oat milk", query_cs: "ovesné mléko", category: "milk_alternatives" }
+  - { query: "almond milk", query_cs: "mandlové mléko", category: "milk_alternatives" }
+  - { query: "soy milk", query_cs: "sójové mléko", category: "milk_alternatives" }
+  - { query: "coconut milk", query_cs: "kokosové mléko", category: "milk_alternatives" }
+  - { query: "rice milk", query_cs: "rýžové mléko", category: "milk_alternatives" }
   - { query: "kefir", query_cs: "kefír", category: "dairy" }
   - { query: "buttermilk", query_cs: "podmáslí", category: "dairy" }
   - { query: "heavy cream", query_cs: "smetana ke šlehání", category: "dairy" }

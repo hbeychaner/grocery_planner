@@ -131,7 +131,7 @@ class OllamaService:
         )
 
         prompt = f"""Grocery query: "{query.strip()}"
-Rules: Keep each language key ({langs_list}) strictly in that language. No weights/numbers unless in input. "category" is one English slug: dairy, bakery, produce, beverages, meat, seafood, pantry, snacks, frozen, household, other.
+Rules: Keep each language key ({langs_list}) strictly in that language. No weights/numbers unless in input. "category" is one English slug: dairy, milk_alternatives, bakery, produce, beverages, meat, seafood, pantry, snacks, frozen, household, other.
 Return ONLY JSON:
 {{"source_language":"<iso>","translations":{{{translations_example}}},"category":"<slug>","labels":{{{labels_example}}},"synonyms":{{{synonyms_example}}},"is_compound":true}}"""
 
