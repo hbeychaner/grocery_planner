@@ -5,11 +5,13 @@ from unittest.mock import AsyncMock
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from sqlalchemy.orm import Session
+
 from app.main import app
 from app.models.comparison import ComparisonResponse, MatchedProductPair
 from app.models.enums import PriceAdvantage, StoreType, UnitType
 from app.models.product import StoreProduct
-from app.services.price_history import PriceHistoryService
+from app.services.price_history import PriceHistoryService, PriceSnapshotRecord
 from app.services.tracker_runner import PriceTrackerRunner
 
 
@@ -192,4 +194,79 @@ def test_price_history_separates_bio_and_regular_series() -> None:
     assert series.rohlik_bio_series[0].unit_price == 133.17
     assert len(series.kosik_series) == 1
     assert len(series.kosik_bio_series) == 0
+    history.close()
+
+
+def test_csu_bls_matched_basket_analytics_and_series() -> None:
+    """ČSÚ vs. US BLS averages must only include items present in BOTH sources."""
+    history = PriceHistoryService(db_path=Path(":memory:"))
+    history.add_tracked_item("plain flour", query_cs="hladká mouka", category="baking")
+    history.add_tracked_item("honey", query_cs="med", category="baking")
+    history.add_tracked_item("pilsner urquell", query_cs="pilsner urquell", category="alcohol")
+
+    ts = datetime(2026, 3, 1, tzinfo=timezone.utc)
+    with Session(history.engine) as session:
+        session.add_all(
+            [
+                PriceSnapshotRecord(
+                    item_query="plain flour",
+                    store="csu",
+                    product_name="ČSÚ plain flour",
+                    price=20.0,
+                    unit_price=20.0,
+                    unit_type="kg",
+                    recorded_at=ts,
+                ),
+                PriceSnapshotRecord(
+                    item_query="plain flour",
+                    store="bls",
+                    product_name="BLS plain flour",
+                    price=30.0,
+                    unit_price=30.0,
+                    unit_type="kg",
+                    recorded_at=ts,
+                ),
+                # honey is only in ČSÚ, not in BLS — must be excluded from ČSÚ vs. BLS average
+                PriceSnapshotRecord(
+                    item_query="honey",
+                    store="csu",
+                    product_name="ČSÚ honey",
+                    price=250.0,
+                    unit_price=250.0,
+                    unit_type="kg",
+                    recorded_at=ts,
+                ),
+                # pilsner urquell is only in ČSÚ under alcohol — avg_csu/avg_bls should both be None
+                PriceSnapshotRecord(
+                    item_query="pilsner urquell",
+                    store="csu",
+                    product_name="ČSÚ pilsner urquell",
+                    price=60.0,
+                    unit_price=60.0,
+                    unit_type="l",
+                    recorded_at=ts,
+                ),
+            ]
+        )
+        session.commit()
+
+    analytics = history.get_category_analytics()
+    by_cat = {row.category: row for row in analytics.categories}
+    assert by_cat["baking"].avg_csu_unit_price == 20.0
+    assert by_cat["baking"].avg_bls_unit_price == 30.0
+    assert by_cat["alcohol"].display_name == "Alcoholic Beverages"
+    assert by_cat["alcohol"].avg_csu_unit_price is None
+    assert by_cat["alcohol"].avg_bls_unit_price is None
+    assert analytics.overall.avg_csu_unit_price == 20.0
+    assert analytics.overall.avg_bls_unit_price == 30.0
+
+    baking_series = history.get_category_series("baking", days=3650)
+    assert len(baking_series.points) == 1
+    assert baking_series.points[0].avg_csu == 20.0
+    assert baking_series.points[0].avg_bls == 30.0
+
+    alcohol_series = history.get_category_series("alcohol", days=3650)
+    assert len(alcohol_series.points) == 1
+    assert alcohol_series.points[0].avg_csu is None
+    assert alcohol_series.points[0].avg_bls is None
     history.close()

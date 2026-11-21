@@ -228,7 +228,9 @@ groceries:
   - { query: "green tea", query_cs: "zelený čaj", category: "beverages" }
   - { query: "orange juice", query_cs: "pomerančový džus", category: "beverages" }
   - { query: "apple juice", query_cs: "jablečný džus", category: "beverages" }
-  - { query: "pilsner urquell", query_cs: "pilsner urquell", category: "beverages" }
+
+# Alcoholic Beverages
+  - { query: "pilsner urquell", query_cs: "pilsner urquell", category: "alcohol" }
 
   # Household & Personal Care Goods
   - { query: "toothpaste", query_cs: "zubní pasta", category: "goods" }

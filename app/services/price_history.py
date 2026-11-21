@@ -565,6 +565,7 @@ class PriceHistoryService:
             "spices": "Spices & Seasonings",
             "desserts": "Desserts & Sweets",
             "beverages": "Beverages",
+            "alcohol": "Alcoholic Beverages",
             "other": "Other",
         }
         PREFERRED_ORDER = [
@@ -582,6 +583,7 @@ class PriceHistoryService:
             "spices",
             "desserts",
             "beverages",
+            "alcohol",
         ]
 
         with Session(self.engine) as session:
@@ -613,8 +615,8 @@ class PriceHistoryService:
             r_latest: List[float] = []
             k_latest: List[float] = []
             bio_latest: List[float] = []
-            csu_latest: List[float] = []
-            bls_latest: List[float] = []
+            csu_by_q: Dict[str, float] = {}
+            bls_by_q: Dict[str, float] = {}
             curr_all: List[float] = []
             prev_all: List[float] = []
 
@@ -625,9 +627,9 @@ class PriceHistoryService:
                 items_with_data.add(q)
                 latest_p = prices[0]
                 if store == "csu":
-                    csu_latest.append(latest_p)
+                    csu_by_q.setdefault(q, latest_p)
                 elif store == "bls":
-                    bls_latest.append(latest_p)
+                    bls_by_q.setdefault(q, latest_p)
                 elif is_bio:
                     bio_latest.append(latest_p)
                 else:
@@ -638,6 +640,11 @@ class PriceHistoryService:
                     if len(prices) >= 2:
                         curr_all.append(latest_p)
                         prev_all.append(prices[1])
+
+            # Pair ČSÚ and US BLS strictly on items that have data in BOTH sources
+            common_csu_bls = sorted(set(csu_by_q.keys()) & set(bls_by_q.keys()))
+            csu_latest = [csu_by_q[q] for q in common_csu_bls]
+            bls_latest = [bls_by_q[q] for q in common_csu_bls]
 
             blended_pool = r_latest + k_latest
             wow_pct: Optional[float] = None
@@ -708,6 +715,8 @@ class PriceHistoryService:
 
         # Bucket snapshots by month (YYYY-MM) so all sources (Rohlík, Košík, ČSÚ, BLS) align cleanly
         buckets: Dict[str, Dict[str, List[float]]] = {}
+        csu_month_items: Dict[str, Dict[str, List[float]]] = {}
+        bls_month_items: Dict[str, Dict[str, List[float]]] = {}
         for s in snap_rows:
             if s.unit_price is None:
                 continue
@@ -716,12 +725,12 @@ class PriceHistoryService:
                 if isinstance(s.recorded_at, datetime)
                 else str(s.recorded_at)[:7]
             )
-            b = buckets.setdefault(ts_bucket, {"rohlik": [], "kosik": [], "bio": [], "csu": [], "bls": []})
+            b = buckets.setdefault(ts_bucket, {"rohlik": [], "kosik": [], "bio": []})
             val = float(s.unit_price)
             if s.store == "csu":
-                b["csu"].append(val)
+                csu_month_items.setdefault(ts_bucket, {}).setdefault(s.item_query, []).append(val)
             elif s.store == "bls":
-                b["bls"].append(val)
+                bls_month_items.setdefault(ts_bucket, {}).setdefault(s.item_query, []).append(val)
             elif s.is_bio:
                 b["bio"].append(val)
             elif s.store == "rohlik":
@@ -735,8 +744,11 @@ class PriceHistoryService:
             r_vals = b["rohlik"]
             k_vals = b["kosik"]
             bio_vals = b["bio"]
-            csu_vals = b["csu"]
-            bls_vals = b["bls"]
+            csu_items = csu_month_items.get(ts_key, {})
+            bls_items = bls_month_items.get(ts_key, {})
+            common_items = set(csu_items.keys()) & set(bls_items.keys())
+            csu_vals = [sum(csu_items[q]) / len(csu_items[q]) for q in common_items]
+            bls_vals = [sum(bls_items[q]) / len(bls_items[q]) for q in common_items]
             blended_vals = r_vals + k_vals
             points.append(
                 CategorySeriesPoint(
