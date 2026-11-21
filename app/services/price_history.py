@@ -124,6 +124,24 @@ class CategoryAnalyticsResponse(BaseModel):
     categories: List[CategoryAnalyticsRow] = Field(default_factory=list)
 
 
+class CategorySeriesPoint(BaseModel):
+    """Single timestamp point for overall/category average price trend."""
+
+    recorded_at: str
+    avg_rohlik: Optional[float] = None
+    avg_kosik: Optional[float] = None
+    blended_avg: Optional[float] = None
+    avg_bio: Optional[float] = None
+
+
+class CategoryHistorySeries(BaseModel):
+    """Time-series average unit prices for a category or overall."""
+
+    category: str
+    display_name: str
+    points: List[CategorySeriesPoint] = Field(default_factory=list)
+
+
 class PriceHistoryService:
     """SQLAlchemy-backed storage for tracked grocery items and historical unit-price snapshots."""
 
@@ -623,6 +641,79 @@ class PriceHistoryService:
         )
         category_rows = [_build_row(c, by_cat[c]) for c in ordered_cats]
         return CategoryAnalyticsResponse(overall=overall_row, categories=category_rows)
+
+    def get_category_series(self, category: str = "overall", days: int = 90) -> CategoryHistorySeries:
+        """Compute time-series average unit prices for a category (or overall) across sweeps."""
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        cat_norm = (category or "overall").strip().lower()
+
+        with Session(self.engine) as session:
+            item_rows = session.execute(
+                select(TrackedItemRecord.query, TrackedItemRecord.category).where(
+                    TrackedItemRecord.active.is_(True)
+                )
+            ).all()
+            allowed_queries = {
+                r[0]
+                for r in item_rows
+                if cat_norm == "overall" or (r[1] or "other") == cat_norm
+            }
+
+            if not allowed_queries:
+                return CategoryHistorySeries(
+                    category=cat_norm,
+                    display_name=cat_norm.replace("_", " ").title(),
+                    points=[],
+                )
+
+            snap_rows = session.scalars(
+                select(PriceSnapshotRecord)
+                .where(
+                    PriceSnapshotRecord.item_query.in_(allowed_queries),
+                    PriceSnapshotRecord.unit_price.is_not(None),
+                    PriceSnapshotRecord.recorded_at >= cutoff,
+                )
+                .order_by(PriceSnapshotRecord.recorded_at.asc(), PriceSnapshotRecord.id.asc())
+            ).all()
+
+        # Bucket snapshots by date (YYYY-MM-DD HH:MM) so each sweep forms one clean point
+        buckets: Dict[str, Dict[str, List[float]]] = {}
+        for s in snap_rows:
+            if s.unit_price is None:
+                continue
+            ts_bucket = (
+                s.recorded_at.strftime("%Y-%m-%d %H:%M")
+                if isinstance(s.recorded_at, datetime)
+                else str(s.recorded_at)[:16]
+            )
+            b = buckets.setdefault(ts_bucket, {"rohlik": [], "kosik": [], "bio": []})
+            val = float(s.unit_price)
+            if s.is_bio:
+                b["bio"].append(val)
+            elif s.store == "rohlik":
+                b["rohlik"].append(val)
+            elif s.store == "kosik":
+                b["kosik"].append(val)
+
+        points: List[CategorySeriesPoint] = []
+        for ts_key in sorted(buckets.keys()):
+            b = buckets[ts_key]
+            r_vals = b["rohlik"]
+            k_vals = b["kosik"]
+            bio_vals = b["bio"]
+            blended_vals = r_vals + k_vals
+            points.append(
+                CategorySeriesPoint(
+                    recorded_at=ts_key,
+                    avg_rohlik=round(sum(r_vals) / len(r_vals), 2) if r_vals else None,
+                    avg_kosik=round(sum(k_vals) / len(k_vals), 2) if k_vals else None,
+                    blended_avg=round(sum(blended_vals) / len(blended_vals), 2) if blended_vals else None,
+                    avg_bio=round(sum(bio_vals) / len(bio_vals), 2) if bio_vals else None,
+                )
+            )
+
+        display = "Overall (All Categories)" if cat_norm == "overall" else cat_norm.replace("_", " ").title()
+        return CategoryHistorySeries(category=cat_norm, display_name=display, points=points)
 
     def close(self) -> None:
         """Dispose SQLAlchemy engine connection pool."""

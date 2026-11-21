@@ -128,6 +128,11 @@ async def test_trends_page_and_history_endpoints() -> None:
         assert analytics["overall"]["category"] == "overall"
         assert len(analytics["categories"]) > 0
 
+        cat_series_resp = await ac.get("/api/v1/history/analytics/series?category=overall&days=90")
+        assert cat_series_resp.status_code == 200
+        cat_series = cat_series_resp.json()
+        assert cat_series["category"] == "overall"
+
 
 def test_price_history_separates_bio_and_regular_series() -> None:
     history = PriceHistoryService(db_path=Path(":memory:"))

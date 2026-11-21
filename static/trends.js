@@ -12,63 +12,134 @@ document.addEventListener("DOMContentLoaded", () => {
   const chartSubtitle = document.getElementById("chart-subtitle");
   const daysSelect = document.getElementById("days-select");
   const snapshotsTbody = document.getElementById("snapshots-tbody");
-  const analyticsTbody = document.getElementById("analytics-tbody");
-  const btnClearCat = document.getElementById("btn-clear-cat");
+  const categoryListContainer = document.getElementById("category-list-container");
+  const catChartTitle = document.getElementById("cat-chart-title");
+  const catSummaryPills = document.getElementById("cat-summary-pills");
+  const categoryCanvas = document.getElementById("category-chart");
   const chartCanvas = document.getElementById("price-chart");
 
   let allItems = [];
+  let analyticsRows = [];
   let selectedQuery = null;
-  let selectedCategory = null;
+  let selectedCategory = null; // null means 'overall'
   let priceChart = null;
+  let categoryChart = null;
 
   async function loadAnalytics() {
     const resp = await fetch("/api/v1/history/analytics");
     const data = await resp.json();
-    const rows = [data.overall, ...(data.categories || [])];
+    analyticsRows = [data.overall, ...(data.categories || [])];
+    renderCategoryList();
+    await loadCategorySeries(selectedCategory || "overall");
+  }
 
-    const fmtPrice = (val) => (val !== null && val !== undefined) ? `${val.toFixed(2)} CZK` : "—";
-    const fmtWow = (val) => {
-      if (val === null || val === undefined) return '<span style="color:#94a3b8;">Baseline</span>';
-      const sign = val > 0 ? "+" : "";
-      const color = val > 0 ? "#dc2626" : (val < 0 ? "#16a34a" : "#475569");
-      return `<span style="color:${color}; font-weight:600;">${sign}${val.toFixed(2)}%</span>`;
-    };
-
-    analyticsTbody.innerHTML = rows.map((row, idx) => {
-      const isOverall = idx === 0;
-      const isSelected = selectedCategory === row.category || (isOverall && !selectedCategory);
-      const bg = isOverall ? "#f8fafc" : (isSelected ? "#eef2ff" : "transparent");
-      const weight = isOverall ? "700" : "500";
+  function renderCategoryList() {
+    categoryListContainer.innerHTML = analyticsRows.map(row => {
+      const isActive = (row.category === "overall" && !selectedCategory) || (row.category === selectedCategory);
+      const avg = row.blended_avg_unit_price !== null ? `${row.blended_avg_unit_price.toFixed(1)} CZK` : "—";
       return `
-        <tr data-category="${row.category}" style="border-bottom: 1px solid #f1f5f9; background:${bg}; font-weight:${weight}; cursor:pointer;">
-          <td style="padding: 8px;">${row.display_name}</td>
-          <td style="padding: 8px;">${row.item_count}</td>
-          <td style="padding: 8px;">${fmtPrice(row.avg_rohlik_unit_price)}</td>
-          <td style="padding: 8px;">${fmtPrice(row.avg_kosik_unit_price)}</td>
-          <td style="padding: 8px; font-weight:700;">${fmtPrice(row.blended_avg_unit_price)}</td>
-          <td style="padding: 8px; color:#166534;">${fmtPrice(row.avg_bio_unit_price)}</td>
-          <td style="padding: 8px;">${fmtWow(row.wow_change_pct)}</td>
-        </tr>
+        <button
+          class="chip"
+          data-category="${row.category}"
+          style="display: flex; justify-content: space-between; align-items: center; text-align: left; width: 100%; border-radius: 8px; padding: 8px 10px; ${isActive ? 'background:#e0e7ff; border-color:#6366f1; font-weight:600;' : ''}"
+        >
+          <span>${row.display_name} (${row.item_count})</span>
+          <span style="font-size: 0.78rem; color: #475569;">${avg}</span>
+        </button>
       `;
     }).join("");
 
-    analyticsTbody.querySelectorAll("tr[data-category]").forEach(tr => {
-      tr.addEventListener("click", () => {
-        const cat = tr.getAttribute("data-category");
+    categoryListContainer.querySelectorAll("button[data-category]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const cat = btn.getAttribute("data-category");
         selectedCategory = (cat === "overall") ? null : cat;
-        btnClearCat.classList.toggle("hidden", !selectedCategory);
+        renderCategoryList();
         renderWatchlist();
-        loadAnalytics();
+        await loadCategorySeries(cat);
       });
     });
   }
 
-  btnClearCat.addEventListener("click", () => {
-    selectedCategory = null;
-    btnClearCat.classList.add("hidden");
-    renderWatchlist();
-    loadAnalytics();
-  });
+  async function loadCategorySeries(category) {
+    const days = daysSelect.value || "90";
+    const resp = await fetch(`/api/v1/history/analytics/series?category=${encodeURIComponent(category)}&days=${days}`);
+    const series = await resp.json();
+
+    const meta = analyticsRows.find(r => r.category === category) || analyticsRows[0];
+    catChartTitle.textContent = meta ? meta.display_name : series.display_name;
+
+    if (meta) {
+      const fmt = (v) => (v !== null && v !== undefined) ? `${v.toFixed(2)} CZK` : "—";
+      const wow = (meta.wow_change_pct !== null && meta.wow_change_pct !== undefined)
+        ? `${meta.wow_change_pct > 0 ? "+" : ""}${meta.wow_change_pct.toFixed(2)}%`
+        : "Baseline";
+      catSummaryPills.innerHTML = `
+        <span class="unit-pill">Blended: <strong>${fmt(meta.blended_avg_unit_price)}</strong></span>
+        <span class="unit-pill">Rohlík: ${fmt(meta.avg_rohlik_unit_price)}</span>
+        <span class="unit-pill">Košík: ${fmt(meta.avg_kosik_unit_price)}</span>
+        <span class="unit-pill" style="background:#dcfce7; color:#166534;">BIO: ${fmt(meta.avg_bio_unit_price)}</span>
+        <span class="unit-pill">WoW: <strong>${wow}</strong></span>
+      `;
+    }
+
+    const points = series.points || [];
+    const labels = points.map(p => p.recorded_at);
+
+    if (categoryChart) {
+      categoryChart.destroy();
+    }
+
+    categoryChart = new Chart(categoryCanvas, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [
+          {
+            label: "Blended Avg (CZK)",
+            data: points.map(p => p.blended_avg),
+            borderColor: "#0f172a",
+            backgroundColor: "rgba(15, 23, 42, 0.08)",
+            borderWidth: 2.5,
+            tension: 0.25,
+            spanGaps: true,
+          },
+          {
+            label: "Rohlík Avg (CZK)",
+            data: points.map(p => p.avg_rohlik),
+            borderColor: "#7c3aed",
+            tension: 0.25,
+            spanGaps: true,
+          },
+          {
+            label: "Košík Avg (CZK)",
+            data: points.map(p => p.avg_kosik),
+            borderColor: "#d97706",
+            tension: 0.25,
+            spanGaps: true,
+          },
+          {
+            label: "BIO Avg (CZK)",
+            data: points.map(p => p.avg_bio),
+            borderColor: "#16a34a",
+            borderDash: [5, 5],
+            tension: 0.25,
+            spanGaps: true,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: "index", intersect: false },
+        scales: {
+          y: {
+            beginAtZero: false,
+            title: { display: true, text: "Average Unit Price (CZK)" },
+          },
+        },
+      },
+    });
+  }
 
   async function loadWatchlist() {
     const [itemsResp] = await Promise.all([
@@ -254,6 +325,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   filterInput.addEventListener("input", renderWatchlist);
   daysSelect.addEventListener("change", () => {
+    loadCategorySeries(selectedCategory || "overall");
     if (selectedQuery) loadItemSeries(selectedQuery);
   });
 

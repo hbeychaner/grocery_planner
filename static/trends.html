@@ -50,30 +50,24 @@
     <!-- Status Banner -->
     <div id="run-status" class="winner-banner tied hidden" style="margin-bottom: 20px;"></div>
 
-    <!-- Overall & Category Inflation Analytics Table -->
-    <section class="store-card" style="padding: 20px; margin-bottom: 20px;">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-        <div>
-          <h2 style="font-size: 1.15rem;">📊 Overall &amp; Category Price Analytics</h2>
-          <p style="font-size: 0.85rem; color: #64748b;">Average normalized unit prices across categories (click a row to filter the watchlist below)</p>
+    <!-- Overall & Category Inflation Analytics (Master-Detail Graph) -->
+    <section style="display: grid; grid-template-columns: 280px 1fr; gap: 20px; align-items: start; margin-bottom: 24px;">
+      <aside class="store-card" style="padding: 16px;">
+        <h3 style="margin-bottom: 10px; font-size: 1rem;">📊 Categories &amp; Overall</h3>
+        <div id="category-list-container" style="max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;"></div>
+      </aside>
+
+      <div class="store-card" style="padding: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+          <div>
+            <h2 id="cat-chart-title" style="font-size: 1.2rem;">Overall (All Categories)</h2>
+            <p id="cat-chart-subtitle" style="font-size: 0.85rem; color: #64748b;">Average normalized unit price over time (weekly inflation view)</p>
+          </div>
+          <div id="cat-summary-pills" style="display: flex; gap: 8px; flex-wrap: wrap; font-size: 0.82rem;"></div>
         </div>
-        <button id="btn-clear-cat" class="btn btn-outline hidden" style="padding: 4px 10px; font-size: 0.82rem;">Show All Categories</button>
-      </div>
-      <div style="overflow-x: auto;">
-        <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
-          <thead>
-            <tr style="text-align: left; border-bottom: 2px solid #e2e8f0; color: #64748b;">
-              <th style="padding: 8px;">Category</th>
-              <th style="padding: 8px;">Items</th>
-              <th style="padding: 8px;">Rohlík Avg (Regular)</th>
-              <th style="padding: 8px;">Košík Avg (Regular)</th>
-              <th style="padding: 8px;">Blended Avg</th>
-              <th style="padding: 8px;">BIO Avg</th>
-              <th style="padding: 8px;">Weekly Change</th>
-            </tr>
-          </thead>
-          <tbody id="analytics-tbody"></tbody>
-        </table>
+        <div style="position: relative; height: 240px;">
+          <canvas id="category-chart"></canvas>
+        </div>
       </div>
     </section>
 
@@ -130,6 +124,6 @@
     </footer>
   </div>
 
-  <script src="/static/trends.js?v=1.1"></script>
+  <script src="/static/trends.js?v=1.2"></script>
 </body>
 </html>
