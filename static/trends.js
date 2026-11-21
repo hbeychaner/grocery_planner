@@ -8,6 +8,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const newItemInput = document.getElementById("new-item-input");
   const btnRunCheck = document.getElementById("btn-run-check");
   const btnSyncCsu = document.getElementById("btn-sync-csu");
+  const btnSyncBls = document.getElementById("btn-sync-bls");
   const runStatus = document.getElementById("run-status");
   const chartTitle = document.getElementById("chart-title");
   const chartSubtitle = document.getElementById("chart-subtitle");
@@ -80,6 +81,7 @@ document.addEventListener("DOMContentLoaded", () => {
         <span class="unit-pill">Košík: ${fmt(meta.avg_kosik_unit_price)}</span>
         <span class="unit-pill" style="background:#dcfce7; color:#166534;">BIO: ${fmt(meta.avg_bio_unit_price)}</span>
         <span class="unit-pill" style="background:#f1f5f9; color:#334155;">ČSÚ Avg: ${fmt(meta.avg_csu_unit_price)}</span>
+        <span class="unit-pill" style="background:#dbeafe; color:#1d4ed8;">US Avg: ${fmt(meta.avg_bls_unit_price)}</span>
         <span class="unit-pill">WoW: <strong>${wow}</strong></span>
       `;
     }
@@ -132,6 +134,14 @@ document.addEventListener("DOMContentLoaded", () => {
             data: points.map(p => p.avg_csu),
             borderColor: "#64748b",
             borderDash: [2, 3],
+            tension: 0.25,
+            spanGaps: true,
+          },
+          {
+            label: "US National Avg (BLS in CZK)",
+            data: points.map(p => p.avg_bls),
+            borderColor: "#2563eb",
+            borderDash: [4, 4],
             tension: 0.25,
             spanGaps: true,
           },
@@ -227,6 +237,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const rohlikBio = data.rohlik_bio_series || [];
     const kosikBio = data.kosik_bio_series || [];
     const csuSeries = data.csu_series || [];
+    const blsSeries = data.bls_series || [];
 
     const timestamps = Array.from(new Set([
       ...rohlikReg.map(p => p.recorded_at),
@@ -234,6 +245,7 @@ document.addEventListener("DOMContentLoaded", () => {
       ...rohlikBio.map(p => p.recorded_at),
       ...kosikBio.map(p => p.recorded_at),
       ...csuSeries.map(p => p.recorded_at),
+      ...blsSeries.map(p => p.recorded_at),
     ])).sort();
 
     const rMap = new Map(rohlikReg.map(p => [p.recorded_at, p.unit_price]));
@@ -241,6 +253,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const rBioMap = new Map(rohlikBio.map(p => [p.recorded_at, p.unit_price]));
     const kBioMap = new Map(kosikBio.map(p => [p.recorded_at, p.unit_price]));
     const csuMap = new Map(csuSeries.map(p => [p.recorded_at, p.unit_price]));
+    const blsMap = new Map(blsSeries.map(p => [p.recorded_at, p.unit_price]));
 
     if (priceChart) {
       priceChart.destroy();
@@ -298,6 +311,17 @@ document.addEventListener("DOMContentLoaded", () => {
         spanGaps: true,
       });
     }
+    if (blsSeries.length > 0) {
+      datasets.push({
+        label: `US National Avg BLS (CZK/${unitLabel})`,
+        data: timestamps.map(t => blsMap.has(t) ? blsMap.get(t) : null),
+        borderColor: "#2563eb",
+        backgroundColor: "rgba(37, 99, 235, 0.12)",
+        borderDash: [4, 4],
+        tension: 0.25,
+        spanGaps: true,
+      });
+    }
 
     priceChart = new Chart(chartCanvas, {
       type: "line",
@@ -326,6 +350,7 @@ document.addEventListener("DOMContentLoaded", () => {
       ...(data.rohlik_bio_series || []).map(p => ({ ...p, storeLabel: "Rohlík" })),
       ...(data.kosik_bio_series || []).map(p => ({ ...p, storeLabel: "Košík" })),
       ...(data.csu_series || []).map(p => ({ ...p, storeLabel: "ČSÚ Avg" })),
+      ...(data.bls_series || []).map(p => ({ ...p, storeLabel: "US BLS" })),
     ].sort((a, b) => b.recorded_at.localeCompare(a.recorded_at));
 
     if (combined.length === 0) {
@@ -383,6 +408,24 @@ document.addEventListener("DOMContentLoaded", () => {
     } finally {
       btnSyncCsu.disabled = false;
       btnSyncCsu.textContent = "⬇ Sync ČSÚ History";
+    }
+  });
+
+  btnSyncBls.addEventListener("click", async () => {
+    btnSyncBls.disabled = true;
+    btnSyncBls.textContent = "⏳ Syncing US...";
+    runStatus.classList.remove("hidden");
+    runStatus.textContent = "Fetching US BLS averages & historical USD->CZK exchange rates...";
+    try {
+      const resp = await fetch("/api/v1/history/ingest-bls", { method: "POST" });
+      const res = await resp.json();
+      runStatus.textContent = `Synced US BLS: ${res.series_fetched} items (${res.fx_months_loaded} FX months), ${res.snapshots_inserted} snapshots loaded.`;
+      await loadWatchlist();
+    } catch (err) {
+      runStatus.textContent = `US BLS sync failed: ${err.message}`;
+    } finally {
+      btnSyncBls.disabled = false;
+      btnSyncBls.textContent = "🇺🇸 Sync US (BLS)";
     }
   });
 

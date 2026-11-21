@@ -2,7 +2,8 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from app.api.deps import get_csu_service, get_price_history_service, get_tracker_runner
+from app.api.deps import get_bls_service, get_csu_service, get_price_history_service, get_tracker_runner
+from app.services.bls_client import BlsIngestResult, BlsPriceIngestionService
 from app.services.csu_client import CsuIngestResult, CsuPriceIngestionService
 from app.services.price_history import (
     CategoryAnalyticsResponse,
@@ -106,3 +107,11 @@ async def ingest_csu_history(
 ) -> CsuIngestResult:
     """Fetch and pair historical monthly Czech national averages from ČSÚ DataStat API."""
     return await csu.ingest_all()
+
+
+@router.post("/ingest-bls", response_model=BlsIngestResult)
+async def ingest_bls_history(
+    bls: BlsPriceIngestionService = Depends(get_bls_service),
+) -> BlsIngestResult:
+    """Fetch U.S. BLS average food prices converted to CZK via historical USD->CZK rates."""
+    return await bls.ingest_all()

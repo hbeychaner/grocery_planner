@@ -4,6 +4,7 @@ from app.clients.rohlik import RohlikStoreClient
 from app.clients.kosik import KosikStoreClient
 from app.clients.kupi import KupiClient
 from app.services.bilingual import BilingualQueryService
+from app.services.bls_client import BlsPriceIngestionService
 from app.services.comparator import PriceComparisonService
 from app.services.csu_client import CsuPriceIngestionService
 from app.services.matcher import ProductMatchingService
@@ -58,6 +59,7 @@ _csu_service = CsuPriceIngestionService(
     history=_price_history_service,
     matcher=_matcher_service,
 )
+_bls_service = BlsPriceIngestionService(history=_price_history_service)
 
 
 def get_comparison_service() -> PriceComparisonService:
@@ -108,3 +110,8 @@ def get_kupi_client() -> KupiClient:
 def get_csu_service() -> CsuPriceIngestionService:
     """Dependency provider for CsuPriceIngestionService."""
     return _csu_service
+
+
+def get_bls_service() -> BlsPriceIngestionService:
+    """Dependency provider for BlsPriceIngestionService."""
+    return _bls_service

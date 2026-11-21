@@ -95,6 +95,7 @@ class ItemPriceHistory(BaseModel):
     rohlik_bio_series: List[PriceSnapshotPoint] = Field(default_factory=list)
     kosik_bio_series: List[PriceSnapshotPoint] = Field(default_factory=list)
     csu_series: List[PriceSnapshotPoint] = Field(default_factory=list)
+    bls_series: List[PriceSnapshotPoint] = Field(default_factory=list)
 
 
 class PriceHistoryStats(BaseModel):
@@ -116,6 +117,7 @@ class CategoryAnalyticsRow(BaseModel):
     blended_avg_unit_price: Optional[float] = None
     avg_bio_unit_price: Optional[float] = None
     avg_csu_unit_price: Optional[float] = None
+    avg_bls_unit_price: Optional[float] = None
     wow_change_pct: Optional[float] = None
 
 
@@ -135,6 +137,7 @@ class CategorySeriesPoint(BaseModel):
     blended_avg: Optional[float] = None
     avg_bio: Optional[float] = None
     avg_csu: Optional[float] = None
+    avg_bls: Optional[float] = None
 
 
 class CategoryHistorySeries(BaseModel):
@@ -473,6 +476,7 @@ class PriceHistoryService:
             rohlik_bio_series: List[PriceSnapshotPoint] = []
             kosik_bio_series: List[PriceSnapshotPoint] = []
             csu_series: List[PriceSnapshotPoint] = []
+            bls_series: List[PriceSnapshotPoint] = []
             detected_unit = "kg"
 
             for row in rows:
@@ -492,7 +496,7 @@ class PriceHistoryService:
                     is_bio=bool(row.is_bio),
                     recorded_at=ts_str,
                 )
-                if row.unit_type and not row.is_bio and row.store != "csu":
+                if row.unit_type and not row.is_bio and row.store not in ("csu", "bls"):
                     detected_unit = row.unit_type
                 elif row.unit_type and detected_unit == "kg":
                     detected_unit = row.unit_type
@@ -503,6 +507,8 @@ class PriceHistoryService:
                     (kosik_bio_series if row.is_bio else kosik_series).append(point)
                 elif row.store == "csu":
                     csu_series.append(point)
+                elif row.store == "bls":
+                    bls_series.append(point)
 
             return ItemPriceHistory(
                 query=norm,
@@ -512,6 +518,7 @@ class PriceHistoryService:
                 rohlik_bio_series=rohlik_bio_series,
                 kosik_bio_series=kosik_bio_series,
                 csu_series=csu_series,
+                bls_series=bls_series,
             )
 
     def get_stats(self) -> PriceHistoryStats:
@@ -599,6 +606,7 @@ class PriceHistoryService:
             k_latest: List[float] = []
             bio_latest: List[float] = []
             csu_latest: List[float] = []
+            bls_latest: List[float] = []
             curr_all: List[float] = []
             prev_all: List[float] = []
 
@@ -610,6 +618,8 @@ class PriceHistoryService:
                 latest_p = prices[0]
                 if store == "csu":
                     csu_latest.append(latest_p)
+                elif store == "bls":
+                    bls_latest.append(latest_p)
                 elif is_bio:
                     bio_latest.append(latest_p)
                 else:
@@ -637,6 +647,7 @@ class PriceHistoryService:
                 blended_avg_unit_price=round(sum(blended_pool) / len(blended_pool), 2) if blended_pool else None,
                 avg_bio_unit_price=round(sum(bio_latest) / len(bio_latest), 2) if bio_latest else None,
                 avg_csu_unit_price=round(sum(csu_latest) / len(csu_latest), 2) if csu_latest else None,
+                avg_bls_unit_price=round(sum(bls_latest) / len(bls_latest), 2) if bls_latest else None,
                 wow_change_pct=wow_pct,
             )
 
@@ -697,10 +708,12 @@ class PriceHistoryService:
                 if isinstance(s.recorded_at, datetime)
                 else str(s.recorded_at)[:16]
             )
-            b = buckets.setdefault(ts_bucket, {"rohlik": [], "kosik": [], "bio": [], "csu": []})
+            b = buckets.setdefault(ts_bucket, {"rohlik": [], "kosik": [], "bio": [], "csu": [], "bls": []})
             val = float(s.unit_price)
             if s.store == "csu":
                 b["csu"].append(val)
+            elif s.store == "bls":
+                b["bls"].append(val)
             elif s.is_bio:
                 b["bio"].append(val)
             elif s.store == "rohlik":
@@ -715,6 +728,7 @@ class PriceHistoryService:
             k_vals = b["kosik"]
             bio_vals = b["bio"]
             csu_vals = b["csu"]
+            bls_vals = b["bls"]
             blended_vals = r_vals + k_vals
             points.append(
                 CategorySeriesPoint(
@@ -724,6 +738,7 @@ class PriceHistoryService:
                     blended_avg=round(sum(blended_vals) / len(blended_vals), 2) if blended_vals else None,
                     avg_bio=round(sum(bio_vals) / len(bio_vals), 2) if bio_vals else None,
                     avg_csu=round(sum(csu_vals) / len(csu_vals), 2) if csu_vals else None,
+                    avg_bls=round(sum(bls_vals) / len(bls_vals), 2) if bls_vals else None,
                 )
             )
 

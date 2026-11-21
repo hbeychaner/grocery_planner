@@ -5,6 +5,7 @@ import pytest
 
 from app.clients.kupi import KupiClient
 from app.models.enums import UnitType
+from app.services.bls_client import BlsPriceIngestionService
 from app.services.csu_client import CsuPriceIngestionService
 from app.services.price_history import PriceHistoryService
 
@@ -86,4 +87,51 @@ async def test_csu_ingest_into_sqlite() -> None:
     series = history.get_item_history("butter", days=3650)
     assert len(series.csu_series) >= 2
     assert series.csu_series[0].unit_price == 220.0  # 55.0 * 4
+    history.close()
+
+
+@pytest.mark.asyncio
+async def test_bls_ingest_with_historical_fx() -> None:
+    history = PriceHistoryService(db_path=Path(":memory:"))
+    history.add_tracked_item("whole milk", query_cs="plnotučné mléko", category="dairy")
+    bls = BlsPriceIngestionService(history=history)
+
+    mock_fx_json = {
+        "rates": {
+            "2026-10-01": {"CZK": 22.5},
+            "2026-10-15": {"CZK": 22.5},
+        }
+    }
+    mock_bls_json = {
+        "status": "REQUEST_SUCCEEDED",
+        "Results": {
+            "series": [
+                {
+                    "seriesID": "APU0000709112",
+                    "data": [{"year": "2026", "period": "M10", "value": "4.000"}],
+                }
+            ]
+        },
+    }
+
+    with patch("httpx.AsyncClient.get") as mock_get, patch("httpx.AsyncClient.post") as mock_post:
+        mock_fx_resp = AsyncMock()
+        mock_fx_resp.status_code = 200
+        mock_fx_resp.json = lambda: mock_fx_json
+        mock_get.return_value = mock_fx_resp
+
+        mock_bls_resp = AsyncMock()
+        mock_bls_resp.status_code = 200
+        mock_bls_resp.json = lambda: mock_bls_json
+        mock_post.return_value = mock_bls_resp
+
+        res = await bls.ingest_all()
+        assert res.series_fetched == 1
+        assert res.fx_months_loaded == 1
+        assert res.snapshots_inserted == 1
+
+    series = history.get_item_history("whole milk", days=3650)
+    assert len(series.bls_series) == 1
+    # $4.00/gal * (1 / 3.78541178) * 22.5 CZK/USD ~= 23.78 CZK/l
+    assert series.bls_series[0].unit_price == pytest.approx(23.78, abs=0.05)
     history.close()
