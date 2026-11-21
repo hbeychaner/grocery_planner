@@ -17,6 +17,7 @@ async def test_compare_single_item(
 
     service = PriceComparisonService(rohlik_client=r_client, kosik_client=k_client)
     res = await service.compare_single_item("butter")
+    service.bilingual.cache.close()
 
     assert res.advantage == PriceAdvantage.ROHLIK_CHEAPER
     assert res.cheapest_store == StoreType.ROHLIK
@@ -37,6 +38,7 @@ async def test_compare_basket(
     items = [BasketComparisonItem(query="butter", quantity=2)]
 
     res = await service.compare_basket(items)
+    service.bilingual.cache.close()
 
     assert res.total_rohlik == Decimal("105.80")
     assert res.total_kosik == Decimal("119.80")
