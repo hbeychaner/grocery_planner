@@ -297,7 +297,8 @@ class ProductMatchingService:
         # drop partial matches (e.g. plain "ocet kvasný lihový" or "džus jablečný").
         filtered = full_cs_matches if full_cs_matches else partial_matches
         filtered = self._filter_dominant_unit_type(filtered)
-        return self._filter_by_organic_preference(filtered, query_cs, query)
+        filtered = self._filter_by_organic_preference(filtered, query_cs, query)
+        return self._filter_by_frozen_preference(filtered, query_cs, query)
 
     @classmethod
     def is_organic(cls, text: str) -> bool:
@@ -306,6 +307,30 @@ class ProductMatchingService:
             return False
         norm = cls._strip_accents(text.lower())
         return bool(re.search(r"\b(bio|organic|eko)\b", norm))
+
+    @classmethod
+    def is_frozen(cls, text: str) -> bool:
+        """Return True when product title or query explicitly indicates frozen food."""
+        if not text:
+            return False
+        norm = cls._strip_accents(text.lower())
+        return bool(re.search(r"\b(mrazen[aey]?|zmrazen[aey]?|hluboce\s+zmrazen[aey]?|frozen|protlak)\b", norm))
+
+    @classmethod
+    def _filter_by_frozen_preference(
+        cls, products: List[StoreProduct], query_cs: str, query: str
+    ) -> List[StoreProduct]:
+        """Separate frozen products from fresh products unless the query asks for frozen."""
+        if len(products) <= 1:
+            return products
+
+        wants_frozen = cls.is_frozen(query_cs) or cls.is_frozen(query)
+        if wants_frozen:
+            frozen_only = [p for p in products if cls.is_frozen(p.name)]
+            return frozen_only if frozen_only else products
+
+        fresh_only = [p for p in products if not cls.is_frozen(p.name)]
+        return fresh_only if fresh_only else products
 
     @classmethod
     def _filter_by_organic_preference(

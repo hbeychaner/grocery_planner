@@ -2,7 +2,7 @@ import logging
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 import httpx
-from app.clients.base import BaseStoreClient
+from app.clients.base import BaseStoreClient, normalize_piece_unit_price
 from app.core.config import settings
 from app.models.enums import StoreType, UnitType
 from app.models.product import StoreProduct
@@ -146,6 +146,14 @@ class RohlikStoreClient(BaseStoreClient):
         unit_price_obj = item.get("pricePerUnit")
         unit_price_raw = unit_price_obj.get("full") if isinstance(unit_price_obj, dict) else unit_price_obj
         unit_price = Decimal(str(unit_price_raw)) if unit_price_raw else None
+
+        unit_type, unit_price = normalize_piece_unit_price(
+            name=name,
+            textual_amount=textual_amount,
+            price=price,
+            unit_type=unit_type,
+            unit_price=unit_price,
+        )
 
         # Direct link
         link_path = item.get("link") or ""

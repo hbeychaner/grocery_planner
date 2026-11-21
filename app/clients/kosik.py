@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 import httpx
-from app.clients.base import BaseStoreClient
+from app.clients.base import BaseStoreClient, normalize_piece_unit_price
 from app.core.config import settings
 from app.models.enums import StoreType, UnitType
 from app.models.product import StoreProduct
@@ -68,6 +68,27 @@ class KosikStoreClient(BaseStoreClient):
                 return []
 
             results = resp.json().get("response", {}).get("results", [])
+            # Constructor.io uses strict AND matching; if a multi-word Czech query returns 0 hits,
+            # retry with a shorter core term (e.g. "brambory konzumní" -> "brambory").
+            if not results and len(query.split()) > 1:
+                words = query.strip().split()
+                fallback_q = " ".join(words[:2]) if len(words) > 2 else words[0]
+                if fallback_q != query.strip():
+                    fb_url = (
+                        f"https://ac.cnstrc.com/search/{quote(fallback_q)}"
+                        f"?key={self.CONSTRUCTOR_KEY}&num_results_per_page={limit}"
+                    )
+                    fb_resp = await client.get(fb_url)
+                    if fb_resp.status_code == 200:
+                        results = fb_resp.json().get("response", {}).get("results", [])
+                        if not results and len(words) > 2:
+                            fb_url_1 = (
+                                f"https://ac.cnstrc.com/search/{quote(words[0])}"
+                                f"?key={self.CONSTRUCTOR_KEY}&num_results_per_page={limit}"
+                            )
+                            fb_resp_1 = await client.get(fb_url_1)
+                            if fb_resp_1.status_code == 200:
+                                results = fb_resp_1.json().get("response", {}).get("results", [])
             product_items: List[Dict[str, Any]] = []
             for item in results:
                 data = item.get("data", {})
@@ -184,6 +205,14 @@ class KosikStoreClient(BaseStoreClient):
             Decimal(str(round(float(unit_price_val), 2)))
             if unit_price_val is not None
             else None
+        )
+
+        unit_type, unit_price = normalize_piece_unit_price(
+            name=name,
+            textual_amount="",
+            price=price,
+            unit_type=unit_type,
+            unit_price=unit_price,
         )
 
         # Links and media

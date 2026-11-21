@@ -353,3 +353,41 @@ def test_csu_bls_matched_basket_analytics_and_series() -> None:
     assert gen_baking_series.points[0].avg_rohlik == 78.0
     assert gen_baking_series.points[0].avg_csu == 100.0
     history.close()
+
+
+def test_normalize_piece_unit_price_and_frozen_separation() -> None:
+    """Piece-priced items with approx weight normalize to kg/l, and frozen separates from fresh."""
+    from app.clients.base import normalize_piece_unit_price
+    from app.services.matcher import ProductMatchingService
+
+    ut, up = normalize_piece_unit_price(
+        name="Okurka hadovka (cca 260 g)",
+        textual_amount="1 ks",
+        price=Decimal("24.90"),
+        unit_type=UnitType.PIECE,
+        unit_price=Decimal("24.90"),
+    )
+    assert ut == UnitType.KILOGRAM
+    assert up == Decimal("95.77")
+
+    ut_eggs, up_eggs = normalize_piece_unit_price(
+        name="Vejce čerstvá 10 ks",
+        textual_amount="10 ks",
+        price=Decimal("59.90"),
+        unit_type=UnitType.PIECE,
+        unit_price=Decimal("5.99"),
+    )
+    assert ut_eggs == UnitType.PIECE
+    assert up_eggs == Decimal("5.99")
+
+    matcher = ProductMatchingService()
+    fresh = StoreProduct(
+        store=StoreType.ROHLIK, product_id="1", name="Baby špenát čerstvý",
+        price=Decimal("29.90"), unit_type=UnitType.KILOGRAM, unit_price=Decimal("204.90"), in_stock=True,
+    )
+    frozen = StoreProduct(
+        store=StoreType.ROHLIK, product_id="2", name="Agro Jesenice Český špenát protlak",
+        price=Decimal("19.90"), unit_type=UnitType.KILOGRAM, unit_price=Decimal("44.22"), in_stock=True,
+    )
+    filtered = matcher._filter_relevant_products("špenát", [frozen, fresh], "spinach")
+    assert [p.name for p in filtered] == ["Baby špenát čerstvý"]

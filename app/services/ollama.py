@@ -240,11 +240,12 @@ Return ONLY JSON:
 Candidate products:
 {items_str}
 
-Select ONLY the indices of products that ARE the requested item itself (plain/fresh/standard form).
-STRICTLY EXCLUDE different products that merely contain it as a flavor, ingredient, or derivative:
+Select the indices of products that ARE the requested grocery or household item (including normal varieties, brands, scents, sliced/grated forms, or regional/PDO names like Parmigiano Reggiano for parmesan, or anti-dandruff/volume shampoo for shampoo).
+ONLY EXCLUDE products from a DIFFERENT product category that merely use the item as a flavor or minor ingredient:
 - e.g. for "blueberries" / "borůvky": include fresh or frozen blueberries, EXCLUDE blueberry kefir, skyr, yogurt, jam, tea, or juice.
 - e.g. for "butter" / "máslo": include dairy butter, EXCLUDE butter cookies, peanut butter, or cocoa butter.
-- e.g. for "chicken breast" / "kuřecí prsa": include chicken breast meat, EXCLUDE chicken broth, soup, or cat food.
+- e.g. for "chicken breast" / "kuřecí prsa": include chicken breast meat, EXCLUDE chicken broth, soup, or pet food.
+- e.g. for "juicing oranges" / "pomeranče na šťávu": include fresh oranges, EXCLUDE bottled orange juice.
 Return ONLY valid JSON: {{"relevant_indices": [0, 1]}}"""
 
         model_params = {"num_predict": 128, "temperature": 0.0, "think": self.think}

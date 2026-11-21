@@ -53,6 +53,7 @@ class PriceSnapshotRecord(PriceHistoryBase):
     unit_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     is_on_sale: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_bio: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_frozen: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     recorded_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
@@ -82,6 +83,7 @@ class PriceSnapshotPoint(BaseModel):
     unit_type: Optional[str] = None
     is_on_sale: bool = False
     is_bio: bool = False
+    is_frozen: bool = False
     recorded_at: str
 
 
@@ -177,6 +179,9 @@ class PriceHistoryService:
         if "is_bio" not in cols:
             with self.engine.begin() as conn:
                 conn.execute(text("ALTER TABLE price_snapshots ADD COLUMN is_bio BOOLEAN NOT NULL DEFAULT 0"))
+        if "is_frozen" not in cols:
+            with self.engine.begin() as conn:
+                conn.execute(text("ALTER TABLE price_snapshots ADD COLUMN is_frozen BOOLEAN NOT NULL DEFAULT 0"))
 
     @staticmethod
     def _normalize_query(query: str) -> str:
@@ -296,6 +301,7 @@ class PriceHistoryService:
                     PriceSnapshotRecord.item_query == TrackedItemRecord.query,
                     PriceSnapshotRecord.store == "rohlik",
                     PriceSnapshotRecord.is_bio.is_(False),
+                    PriceSnapshotRecord.is_frozen.is_(False),
                 )
                 .order_by(PriceSnapshotRecord.recorded_at.desc(), PriceSnapshotRecord.id.desc())
                 .limit(1)
@@ -307,6 +313,7 @@ class PriceHistoryService:
                     PriceSnapshotRecord.item_query == TrackedItemRecord.query,
                     PriceSnapshotRecord.store == "kosik",
                     PriceSnapshotRecord.is_bio.is_(False),
+                    PriceSnapshotRecord.is_frozen.is_(False),
                 )
                 .order_by(PriceSnapshotRecord.recorded_at.desc(), PriceSnapshotRecord.id.desc())
                 .limit(1)
@@ -372,14 +379,27 @@ class PriceHistoryService:
             ranked: List[StoreProduct],
             candidates: List[StoreProduct],
             pair_fallback: Optional[StoreProduct],
-        ) -> List[tuple[StoreProduct, bool]]:
-            picked: List[tuple[StoreProduct, bool]] = []
-            # Best regular product from ranked list
-            reg = next((p for p in ranked if not ProductMatchingService.is_organic(p.name)), None)
-            if reg is None and pair_fallback and not ProductMatchingService.is_organic(pair_fallback.name):
+        ) -> List[tuple[StoreProduct, bool, bool]]:
+            picked: List[tuple[StoreProduct, bool, bool]] = []
+            # Best regular (non-BIO, non-frozen) product from ranked list
+            reg = next(
+                (
+                    p
+                    for p in ranked
+                    if not ProductMatchingService.is_organic(p.name)
+                    and not ProductMatchingService.is_frozen(p.name)
+                ),
+                None,
+            )
+            if (
+                reg is None
+                and pair_fallback
+                and not ProductMatchingService.is_organic(pair_fallback.name)
+                and not ProductMatchingService.is_frozen(pair_fallback.name)
+            ):
                 reg = pair_fallback
             if reg is not None:
-                picked.append((reg, False))
+                picked.append((reg, False, False))
 
             # Best BIO/organic product from relevant candidates (matching query + unit_type if regular exists)
             bio_candidates = [
@@ -390,7 +410,6 @@ class PriceHistoryService:
                     same_unit_bio = [p for p in bio_candidates if p.unit_type == reg.unit_type]
                     if same_unit_bio:
                         bio_candidates = same_unit_bio
-                # Use matcher's relevance & ranking so we don't pick unrelated BIO items
                 relevant_bio = ProductMatchingService()._filter_relevant_products(
                     comparison.query_translated,
                     bio_candidates,
@@ -402,11 +421,35 @@ class PriceHistoryService:
                         pool,
                         key=lambda p: p.unit_price if (p.unit_price and p.unit_price > 0) else p.price,
                     )
-                    picked.append((best_bio, True))
+                    picked.append((best_bio, True, ProductMatchingService.is_frozen(best_bio.name)))
 
-            # If no regular product existed at all, record pair_fallback if it was BIO
+            # Best frozen (non-BIO) product if any frozen candidate exists
+            frozen_candidates = [
+                p
+                for p in candidates
+                if ProductMatchingService.is_frozen(p.name)
+                and not ProductMatchingService.is_organic(p.name)
+            ]
+            if frozen_candidates:
+                if reg is not None and reg.unit_type:
+                    same_unit_frozen = [p for p in frozen_candidates if p.unit_type == reg.unit_type]
+                    if same_unit_frozen:
+                        frozen_candidates = same_unit_frozen
+                best_frozen = min(
+                    frozen_candidates,
+                    key=lambda p: p.unit_price if (p.unit_price and p.unit_price > 0) else p.price,
+                )
+                picked.append((best_frozen, False, True))
+
+            # If no regular product existed at all, record pair_fallback
             if reg is None and not picked and pair_fallback is not None:
-                picked.append((pair_fallback, ProductMatchingService.is_organic(pair_fallback.name)))
+                picked.append(
+                    (
+                        pair_fallback,
+                        ProductMatchingService.is_organic(pair_fallback.name),
+                        ProductMatchingService.is_frozen(pair_fallback.name),
+                    )
+                )
 
             return picked
 
@@ -423,7 +466,7 @@ class PriceHistoryService:
 
         snapshots: List[PriceSnapshotRecord] = []
         for store_name, picks in (("rohlik", r_picks), ("kosik", k_picks)):
-            for prod, is_bio_flag in picks:
+            for prod, is_bio_flag, is_frozen_flag in picks:
                 snapshots.append(
                     PriceSnapshotRecord(
                         item_query=norm,
@@ -436,6 +479,7 @@ class PriceHistoryService:
                         unit_type=prod.unit_type.value if prod.unit_type else None,
                         is_on_sale=bool(prod.is_on_sale),
                         is_bio=is_bio_flag,
+                        is_frozen=is_frozen_flag,
                         recorded_at=ts,
                     )
                 )
@@ -472,7 +516,7 @@ class PriceHistoryService:
             ).all()
 
             # Keep latest snapshot per (store, is_bio, YYYY-MM) so x-points align cleanly by month
-            monthly_latest: Dict[tuple[str, bool, str], PriceSnapshotPoint] = {}
+            monthly_latest: Dict[tuple[str, bool, bool, str], PriceSnapshotPoint] = {}
             detected_unit = "kg"
 
             for row in rows:
@@ -481,6 +525,7 @@ class PriceHistoryService:
                     if isinstance(row.recorded_at, datetime)
                     else str(row.recorded_at)[:7]
                 )
+                is_frozen_flag = bool(getattr(row, "is_frozen", False))
                 point = PriceSnapshotPoint(
                     store=row.store,
                     product_name=row.product_name,
@@ -490,14 +535,15 @@ class PriceHistoryService:
                     unit_type=row.unit_type,
                     is_on_sale=bool(row.is_on_sale),
                     is_bio=bool(row.is_bio),
+                    is_frozen=is_frozen_flag,
                     recorded_at=ym_str,
                 )
-                if row.unit_type and not row.is_bio and row.store not in ("csu", "bls"):
+                if row.unit_type and not row.is_bio and not is_frozen_flag and row.store not in ("csu", "bls"):
                     detected_unit = row.unit_type
                 elif row.unit_type and detected_unit == "kg":
                     detected_unit = row.unit_type
 
-                monthly_latest[(row.store, bool(row.is_bio), ym_str)] = point
+                monthly_latest[(row.store, bool(row.is_bio), is_frozen_flag, ym_str)] = point
 
             rohlik_series: List[PriceSnapshotPoint] = []
             kosik_series: List[PriceSnapshotPoint] = []
@@ -506,7 +552,9 @@ class PriceHistoryService:
             csu_series: List[PriceSnapshotPoint] = []
             bls_series: List[PriceSnapshotPoint] = []
 
-            for (store_name, is_bio_flag, _), pt in sorted(monthly_latest.items(), key=lambda x: x[0][2]):
+            for (store_name, is_bio_flag, is_frozen_flag, _), pt in sorted(monthly_latest.items(), key=lambda x: x[0][3]):
+                if is_frozen_flag and not is_bio_flag:
+                    continue
                 if store_name == "rohlik":
                     (rohlik_bio_series if is_bio_flag else rohlik_series).append(pt)
                 elif store_name == "kosik":
@@ -609,19 +657,19 @@ class PriceHistoryService:
                 .order_by(PriceSnapshotRecord.recorded_at.desc(), PriceSnapshotRecord.id.desc())
             ).all()
 
-        # Group snapshots by (item_query, store, is_bio) ordered newest -> oldest
-        grouped: Dict[tuple[str, str, bool], List[float]] = {}
+        # Group snapshots by (item_query, store, is_bio, is_frozen) ordered newest -> oldest
+        grouped: Dict[tuple[str, str, bool, bool], List[float]] = {}
         for s in snap_rows:
             if s.item_query not in item_cats or s.unit_price is None:
                 continue
-            key = (s.item_query, s.store, bool(s.is_bio))
+            key = (s.item_query, s.store, bool(s.is_bio), bool(getattr(s, "is_frozen", False)))
             grouped.setdefault(key, []).append(float(s.unit_price))
 
         def _build_row(cat_key: str, queries_in_cat: List[str]) -> CategoryAnalyticsRow:
             q_set = set(queries_in_cat)
             item_sources: Dict[str, set[str]] = {}
-            for (q, store, is_bio) in grouped:
-                if q in q_set and not is_bio:
+            for (q, store, is_bio, is_frozen) in grouped:
+                if q in q_set and not is_bio and not is_frozen:
                     item_sources.setdefault(q, set()).add(store)
 
             common_rk: Optional[set[str]] = None
@@ -645,7 +693,7 @@ class PriceHistoryService:
             prev_all: List[float] = []
 
             items_with_data = set()
-            for (q, store, is_bio), prices in grouped.items():
+            for (q, store, is_bio, is_frozen), prices in grouped.items():
                 if q not in q_set:
                     continue
                 items_with_data.add(q)
@@ -659,6 +707,8 @@ class PriceHistoryService:
                 elif is_bio:
                     if common_rk is None or q in common_rk:
                         bio_latest.append(latest_p)
+                elif is_frozen:
+                    continue
                 else:
                     if common_rk is not None and q not in common_rk:
                         continue
@@ -802,6 +852,8 @@ class PriceHistoryService:
             elif s.is_bio:
                 if common_rk_series is None or s.item_query in common_rk_series:
                     b["bio"].append(val)
+            elif getattr(s, "is_frozen", False):
+                continue
             elif s.store == "rohlik":
                 if common_rk_series is None or s.item_query in common_rk_series:
                     b["rohlik"].append(val)
