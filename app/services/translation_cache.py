@@ -1,14 +1,51 @@
 import json
 import logging
 import re
-import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
+from sqlalchemy import Boolean, DateTime, Index, Integer, String, Text, create_engine, func, select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
+from sqlalchemy.pool import StaticPool
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+class TranslationBase(DeclarativeBase):
+    """SQLAlchemy declarative base for translation cache models."""
+
+
+class TranslationRecord(TranslationBase):
+    """ORM model for cached grocery translations."""
+
+    __tablename__ = "translations"
+    __table_args__ = (
+        Index("idx_translations_lookup", "normalized_term", "target_lang"),
+    )
+
+    normalized_term: Mapped[str] = mapped_column(String, primary_key=True)
+    source_lang: Mapped[str] = mapped_column(String, primary_key=True)
+    target_lang: Mapped[str] = mapped_column(String, primary_key=True)
+    translated_term: Mapped[str] = mapped_column(String, nullable=False)
+    category: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    labels_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    synonyms_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    is_compound: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    source: Mapped[str] = mapped_column(String, nullable=False, default="ollama")
+    hit_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
 
 class CachedTranslation(BaseModel):
@@ -39,57 +76,25 @@ class CompoundQueryAnalysis(BaseModel):
 
 
 class TranslationCacheService:
-    """Local SQLite cache for translated grocery terms and compound keyword metadata."""
+    """SQLAlchemy-backed SQLite cache for translated grocery terms and compound metadata."""
 
     def __init__(self, db_path: Optional[Path] = None) -> None:
         self.db_path = db_path if db_path is not None else settings.translation_db_path
-        self._memory_conn: Optional[sqlite3.Connection] = None
 
-        if str(self.db_path) != ":memory:":
-            Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+        if str(self.db_path) == ":memory:":
+            self.engine = create_engine(
+                "sqlite:///:memory:",
+                connect_args={"check_same_thread": False},
+                poolclass=StaticPool,
+            )
         else:
-            self._memory_conn = sqlite3.connect(":memory:", check_same_thread=False)
-
-        self._init_schema()
-
-    def _get_connection(self) -> sqlite3.Connection:
-        if self._memory_conn is not None:
-            return self._memory_conn
-        conn = sqlite3.connect(str(self.db_path))
-        return conn
-
-    def _init_schema(self) -> None:
-        conn = self._get_connection()
-        try:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS translations (
-                    normalized_term TEXT NOT NULL,
-                    source_lang TEXT NOT NULL,
-                    target_lang TEXT NOT NULL,
-                    translated_term TEXT NOT NULL,
-                    category TEXT,
-                    labels_json TEXT NOT NULL DEFAULT '{}',
-                    synonyms_json TEXT NOT NULL DEFAULT '{}',
-                    is_compound INTEGER NOT NULL DEFAULT 0,
-                    source TEXT NOT NULL DEFAULT 'ollama',
-                    hit_count INTEGER NOT NULL DEFAULT 1,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    PRIMARY KEY (normalized_term, source_lang, target_lang)
-                )
-                """
+            Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+            self.engine = create_engine(
+                f"sqlite:///{Path(self.db_path).resolve()}",
+                connect_args={"check_same_thread": False},
             )
-            conn.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_translations_lookup
-                ON translations (normalized_term, target_lang)
-                """
-            )
-            conn.commit()
-        finally:
-            if self._memory_conn is None:
-                conn.close()
+
+        TranslationBase.metadata.create_all(self.engine)
 
     @staticmethod
     def normalize_term(term: str) -> str:
@@ -107,157 +112,120 @@ class TranslationCacheService:
         if not norm:
             return None
 
-        conn = self._get_connection()
-        try:
+        with Session(self.engine) as session:
+            stmt = select(TranslationRecord).where(
+                TranslationRecord.normalized_term == norm,
+                TranslationRecord.target_lang == target_lang,
+            )
             if source_lang:
-                row = conn.execute(
-                    """
-                    SELECT normalized_term, source_lang, target_lang, translated_term,
-                           category, labels_json, synonyms_json, is_compound, source, hit_count
-                    FROM translations
-                    WHERE normalized_term = ? AND source_lang = ? AND target_lang = ?
-                    """,
-                    (norm, source_lang, target_lang),
-                ).fetchone()
+                stmt = stmt.where(TranslationRecord.source_lang == source_lang)
             else:
-                row = conn.execute(
-                    """
-                    SELECT normalized_term, source_lang, target_lang, translated_term,
-                           category, labels_json, synonyms_json, is_compound, source, hit_count
-                    FROM translations
-                    WHERE normalized_term = ? AND target_lang = ?
-                    ORDER BY hit_count DESC
-                    LIMIT 1
-                    """,
-                    (norm, target_lang),
-                ).fetchone()
+                stmt = stmt.order_by(TranslationRecord.hit_count.desc())
 
-            if not row:
+            row = session.scalars(stmt).first()
+            if row is None:
                 return None
 
-            conn.execute(
-                """
-                UPDATE translations
-                SET hit_count = hit_count + 1, updated_at = CURRENT_TIMESTAMP
-                WHERE normalized_term = ? AND source_lang = ? AND target_lang = ?
-                """,
-                (row[0], row[1], row[2]),
-            )
-            conn.commit()
+            row.hit_count += 1
+            row.updated_at = datetime.now(timezone.utc)
+            session.commit()
 
             return CachedTranslation(
-                normalized_term=row[0],
-                source_lang=row[1],
-                target_lang=row[2],
-                translated_term=row[3],
-                category=row[4],
-                labels=json.loads(row[5] or "{}"),
-                synonyms=json.loads(row[6] or "{}"),
-                is_compound=bool(row[7]),
-                source=row[8],
-                hit_count=int(row[9]) + 1,
+                normalized_term=row.normalized_term,
+                source_lang=row.source_lang,
+                target_lang=row.target_lang,
+                translated_term=row.translated_term,
+                category=row.category,
+                labels=json.loads(row.labels_json or "{}"),
+                synonyms=json.loads(row.synonyms_json or "{}"),
+                is_compound=bool(row.is_compound),
+                source=row.source,
+                hit_count=row.hit_count,
             )
-        finally:
-            if self._memory_conn is None:
-                conn.close()
 
     def upsert(self, record: CachedTranslation) -> None:
-        """Insert or update a translation record in SQLite."""
+        """Insert or update a translation record via SQLAlchemy ORM upsert."""
         norm = self.normalize_term(record.normalized_term)
         if not norm:
             return
 
-        conn = self._get_connection()
-        try:
-            conn.execute(
-                """
-                INSERT INTO translations (
-                    normalized_term, source_lang, target_lang, translated_term,
-                    category, labels_json, synonyms_json, is_compound, source, hit_count
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(normalized_term, source_lang, target_lang) DO UPDATE SET
-                    translated_term = excluded.translated_term,
-                    category = COALESCE(excluded.category, translations.category),
-                    labels_json = excluded.labels_json,
-                    synonyms_json = excluded.synonyms_json,
-                    is_compound = excluded.is_compound,
-                    source = excluded.source,
-                    updated_at = CURRENT_TIMESTAMP
-                """,
-                (
-                    norm,
-                    record.source_lang,
-                    record.target_lang,
-                    record.translated_term,
-                    record.category,
-                    json.dumps(record.labels, ensure_ascii=False),
-                    json.dumps(record.synonyms, ensure_ascii=False),
-                    1 if record.is_compound else 0,
-                    record.source,
-                    record.hit_count,
-                ),
+        now = datetime.now(timezone.utc)
+        with Session(self.engine) as session:
+            stmt = sqlite_insert(TranslationRecord).values(
+                normalized_term=norm,
+                source_lang=record.source_lang,
+                target_lang=record.target_lang,
+                translated_term=record.translated_term,
+                category=record.category,
+                labels_json=json.dumps(record.labels, ensure_ascii=False),
+                synonyms_json=json.dumps(record.synonyms, ensure_ascii=False),
+                is_compound=bool(record.is_compound),
+                source=record.source,
+                hit_count=record.hit_count,
+                created_at=now,
+                updated_at=now,
             )
-            conn.commit()
-        finally:
-            if self._memory_conn is None:
-                conn.close()
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["normalized_term", "source_lang", "target_lang"],
+                set_={
+                    "translated_term": stmt.excluded.translated_term,
+                    "category": func.coalesce(stmt.excluded.category, TranslationRecord.category),
+                    "labels_json": stmt.excluded.labels_json,
+                    "synonyms_json": stmt.excluded.synonyms_json,
+                    "is_compound": stmt.excluded.is_compound,
+                    "source": stmt.excluded.source,
+                    "updated_at": now,
+                },
+            )
+            session.execute(stmt)
+            session.commit()
 
     def seed_from_dictionary(self, dictionary: Dict[str, List[str]]) -> None:
         """Seed SQLite cache idempotently from built-in bilingual dictionary."""
-        conn = self._get_connection()
-        try:
-            rows = []
-            for en_term, cs_variants in dictionary.items():
-                norm = self.normalize_term(en_term)
-                if not norm or not cs_variants:
-                    continue
-                is_compound = 1 if " " in norm else 0
-                synonyms = {"cs": cs_variants[1:]} if len(cs_variants) > 1 else {}
-                labels = {"en": [en_term], "cs": [cs_variants[0]]}
-                rows.append(
-                    (
-                        norm,
-                        "en",
-                        "cs",
-                        cs_variants[0],
-                        None,
-                        json.dumps(labels, ensure_ascii=False),
-                        json.dumps(synonyms, ensure_ascii=False),
-                        is_compound,
-                        "dictionary",
-                        1,
-                    )
-                )
-
-            conn.executemany(
-                """
-                INSERT OR IGNORE INTO translations (
-                    normalized_term, source_lang, target_lang, translated_term,
-                    category, labels_json, synonyms_json, is_compound, source, hit_count
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                rows,
+        now = datetime.now(timezone.utc)
+        values = []
+        for en_term, cs_variants in dictionary.items():
+            norm = self.normalize_term(en_term)
+            if not norm or not cs_variants:
+                continue
+            synonyms = {"cs": cs_variants[1:]} if len(cs_variants) > 1 else {}
+            labels = {"en": [en_term], "cs": [cs_variants[0]]}
+            values.append(
+                {
+                    "normalized_term": norm,
+                    "source_lang": "en",
+                    "target_lang": "cs",
+                    "translated_term": cs_variants[0],
+                    "category": None,
+                    "labels_json": json.dumps(labels, ensure_ascii=False),
+                    "synonyms_json": json.dumps(synonyms, ensure_ascii=False),
+                    "is_compound": " " in norm,
+                    "source": "dictionary",
+                    "hit_count": 1,
+                    "created_at": now,
+                    "updated_at": now,
+                }
             )
-            conn.commit()
-        finally:
-            if self._memory_conn is None:
-                conn.close()
+
+        if not values:
+            return
+
+        with Session(self.engine) as session:
+            stmt = sqlite_insert(TranslationRecord).values(values).on_conflict_do_nothing(
+                index_elements=["normalized_term", "source_lang", "target_lang"]
+            )
+            session.execute(stmt)
+            session.commit()
 
     def count(self) -> int:
         """Return total number of cached translation entries."""
-        conn = self._get_connection()
-        try:
-            row = conn.execute("SELECT COUNT(*) FROM translations").fetchone()
-            return int(row[0]) if row else 0
-        finally:
-            if self._memory_conn is None:
-                conn.close()
+        with Session(self.engine) as session:
+            total = session.scalar(select(func.count()).select_from(TranslationRecord))
+            return int(total or 0)
 
     def close(self) -> None:
-        """Close persistent in-memory connection if open."""
-        if self._memory_conn is not None:
-            self._memory_conn.close()
-            self._memory_conn = None
+        """Dispose SQLAlchemy engine connection pool."""
+        self.engine.dispose()
 
 
 class CompoundKeywordAnalyzer:
