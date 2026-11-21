@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 from app.api.deps import get_price_history_service, get_tracker_runner
 from app.services.price_history import (
+    CategoryAnalyticsResponse,
     ItemPriceHistory,
     PriceHistoryService,
     PriceHistoryStats,
@@ -26,6 +27,14 @@ class TrackedItemsListResponse(BaseModel):
 
     stats: PriceHistoryStats
     items: list[TrackedItem]
+
+
+@router.get("/analytics", response_model=CategoryAnalyticsResponse)
+async def get_category_analytics(
+    history: PriceHistoryService = Depends(get_price_history_service),
+) -> CategoryAnalyticsResponse:
+    """Return overall and per-category average unit prices and weekly inflation metrics."""
+    return history.get_category_analytics()
 
 
 @router.get("/items", response_model=TrackedItemsListResponse)

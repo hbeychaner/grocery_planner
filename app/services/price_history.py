@@ -104,6 +104,26 @@ class PriceHistoryStats(BaseModel):
     last_recorded_at: Optional[str] = None
 
 
+class CategoryAnalyticsRow(BaseModel):
+    """Aggregated unit-price & weekly inflation metrics for a category or overall."""
+
+    category: str
+    display_name: str
+    item_count: int
+    avg_rohlik_unit_price: Optional[float] = None
+    avg_kosik_unit_price: Optional[float] = None
+    blended_avg_unit_price: Optional[float] = None
+    avg_bio_unit_price: Optional[float] = None
+    wow_change_pct: Optional[float] = None
+
+
+class CategoryAnalyticsResponse(BaseModel):
+    """Overall and per-category inflation analytics table."""
+
+    overall: CategoryAnalyticsRow
+    categories: List[CategoryAnalyticsRow] = Field(default_factory=list)
+
+
 class PriceHistoryService:
     """SQLAlchemy-backed storage for tracked grocery items and historical unit-price snapshots."""
 
@@ -168,8 +188,13 @@ class PriceHistoryService:
             return 0
 
         with Session(self.engine) as session:
-            stmt = sqlite_insert(TrackedItemRecord).values(values).on_conflict_do_nothing(
-                index_elements=["query"]
+            stmt = sqlite_insert(TrackedItemRecord).values(values)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["query"],
+                set_={
+                    "query_cs": func.coalesce(stmt.excluded.query_cs, TrackedItemRecord.query_cs),
+                    "category": func.coalesce(stmt.excluded.category, TrackedItemRecord.category),
+                },
             )
             res = session.execute(stmt)
             session.commit()
@@ -483,6 +508,121 @@ class PriceHistoryService:
                 if isinstance(last_ts, datetime)
                 else (str(last_ts) if last_ts is not None else None),
             )
+
+    def get_category_analytics(self) -> CategoryAnalyticsResponse:
+        """Compute overall and per-category average unit prices and weekly inflation %."""
+        CATEGORY_LABELS = {
+            "overall": "Overall (All Categories)",
+            "fruits": "Fruits",
+            "vegetables": "Vegetables",
+            "goods": "Household & Personal Goods",
+            "dairy": "Dairy",
+            "dairy_eggs": "Eggs",
+            "bakery": "Bakery",
+            "meat": "Meat",
+            "seafood": "Seafood",
+            "pantry": "Grains, Rice & Pantry",
+            "baking": "Baking Goods",
+            "spices": "Spices & Seasonings",
+            "desserts": "Desserts & Sweets",
+            "beverages": "Beverages",
+            "other": "Other",
+        }
+        PREFERRED_ORDER = [
+            "fruits",
+            "vegetables",
+            "goods",
+            "dairy",
+            "dairy_eggs",
+            "bakery",
+            "meat",
+            "seafood",
+            "pantry",
+            "baking",
+            "spices",
+            "desserts",
+            "beverages",
+        ]
+
+        with Session(self.engine) as session:
+            item_rows = session.execute(
+                select(TrackedItemRecord.query, TrackedItemRecord.category).where(
+                    TrackedItemRecord.active.is_(True)
+                )
+            ).all()
+            item_cats: Dict[str, str] = {
+                r[0]: (r[1] or "other") for r in item_rows
+            }
+
+            snap_rows = session.scalars(
+                select(PriceSnapshotRecord)
+                .where(PriceSnapshotRecord.unit_price.is_not(None))
+                .order_by(PriceSnapshotRecord.recorded_at.desc(), PriceSnapshotRecord.id.desc())
+            ).all()
+
+        # Group snapshots by (item_query, store, is_bio) ordered newest -> oldest
+        grouped: Dict[tuple[str, str, bool], List[float]] = {}
+        for s in snap_rows:
+            if s.item_query not in item_cats or s.unit_price is None:
+                continue
+            key = (s.item_query, s.store, bool(s.is_bio))
+            grouped.setdefault(key, []).append(float(s.unit_price))
+
+        def _build_row(cat_key: str, queries_in_cat: List[str]) -> CategoryAnalyticsRow:
+            q_set = set(queries_in_cat)
+            r_latest: List[float] = []
+            k_latest: List[float] = []
+            bio_latest: List[float] = []
+            curr_all: List[float] = []
+            prev_all: List[float] = []
+
+            items_with_data = set()
+            for (q, store, is_bio), prices in grouped.items():
+                if q not in q_set:
+                    continue
+                items_with_data.add(q)
+                latest_p = prices[0]
+                if is_bio:
+                    bio_latest.append(latest_p)
+                else:
+                    if store == "rohlik":
+                        r_latest.append(latest_p)
+                    elif store == "kosik":
+                        k_latest.append(latest_p)
+                    if len(prices) >= 2:
+                        curr_all.append(latest_p)
+                        prev_all.append(prices[1])
+
+            blended_pool = r_latest + k_latest
+            wow_pct: Optional[float] = None
+            if prev_all and sum(prev_all) > 0:
+                avg_prev = sum(prev_all) / len(prev_all)
+                avg_curr = sum(curr_all) / len(curr_all)
+                wow_pct = round(((avg_curr - avg_prev) / avg_prev) * 100, 2)
+
+            return CategoryAnalyticsRow(
+                category=cat_key,
+                display_name=CATEGORY_LABELS.get(cat_key, cat_key.replace("_", " ").title()),
+                item_count=len(items_with_data) if items_with_data else len(queries_in_cat),
+                avg_rohlik_unit_price=round(sum(r_latest) / len(r_latest), 2) if r_latest else None,
+                avg_kosik_unit_price=round(sum(k_latest) / len(k_latest), 2) if k_latest else None,
+                blended_avg_unit_price=round(sum(blended_pool) / len(blended_pool), 2) if blended_pool else None,
+                avg_bio_unit_price=round(sum(bio_latest) / len(bio_latest), 2) if bio_latest else None,
+                wow_change_pct=wow_pct,
+            )
+
+        all_queries = list(item_cats.keys())
+        overall_row = _build_row("overall", all_queries)
+
+        by_cat: Dict[str, List[str]] = {}
+        for q, c in item_cats.items():
+            by_cat.setdefault(c, []).append(q)
+
+        ordered_cats = [c for c in PREFERRED_ORDER if c in by_cat] + sorted(
+            c for c in by_cat if c not in PREFERRED_ORDER
+        )
+        category_rows = [_build_row(c, by_cat[c]) for c in ordered_cats]
+        return CategoryAnalyticsResponse(overall=overall_row, categories=category_rows)
 
     def close(self) -> None:
         """Dispose SQLAlchemy engine connection pool."""

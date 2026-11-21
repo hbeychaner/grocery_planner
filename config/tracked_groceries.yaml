@@ -43,68 +43,68 @@ groceries:
   - { query: "baking margarine", query_cs: "hera", category: "baking" }
 
   # Fruits (split by variety for fair cultivar-to-cultivar comparison)
-  - { query: "gala apples", query_cs: "jablka gala", category: "produce" }
-  - { query: "golden delicious apples", query_cs: "jablka golden delicious", category: "produce" }
-  - { query: "granny smith apples", query_cs: "jablka granny smith", category: "produce" }
-  - { query: "pink lady apples", query_cs: "jablka pink lady", category: "produce" }
-  - { query: "idared apples", query_cs: "jablka idared", category: "produce" }
-  - { query: "jonagold apples", query_cs: "jablka jonagold", category: "produce" }
-  - { query: "bananas", query_cs: "banány", category: "produce" }
-  - { query: "eating oranges", query_cs: "pomeranče stolní", category: "produce" }
-  - { query: "juicing oranges", query_cs: "pomeranče na šťávu", category: "produce" }
-  - { query: "lemons", query_cs: "citrony", category: "produce" }
-  - { query: "limes", query_cs: "limetky", category: "produce" }
-  - { query: "mandarins", query_cs: "mandarinky", category: "produce" }
-  - { query: "grapefruit", query_cs: "grapefruit", category: "produce" }
-  - { query: "conference pears", query_cs: "hrušky conference", category: "produce" }
-  - { query: "abate fetel pears", query_cs: "hrušky abate fetel", category: "produce" }
-  - { query: "white seedless grapes", query_cs: "hroznové víno bílé bezsemenné", category: "produce" }
-  - { query: "red seedless grapes", query_cs: "hroznové víno červené bezsemenné", category: "produce" }
-  - { query: "strawberries", query_cs: "jahody", category: "produce" }
-  - { query: "blueberries", query_cs: "borůvky", category: "produce" }
-  - { query: "raspberries", query_cs: "maliny", category: "produce" }
-  - { query: "blackberries", query_cs: "ostružiny", category: "produce" }
-  - { query: "kiwi", query_cs: "kiwi", category: "produce" }
-  - { query: "mango", query_cs: "mango", category: "produce" }
-  - { query: "pineapple", query_cs: "ananas", category: "produce" }
-  - { query: "hass avocado", query_cs: "avokádo hass", category: "produce" }
-  - { query: "greenskin avocado", query_cs: "avokádo greenskin", category: "produce" }
-  - { query: "peaches", query_cs: "broskve", category: "produce" }
-  - { query: "plums", query_cs: "švestky", category: "produce" }
-  - { query: "watermelon", query_cs: "vodní meloun", category: "produce" }
-  - { query: "pomegranate", query_cs: "granátové jablko", category: "produce" }
+  - { query: "gala apples", query_cs: "jablka gala", category: "fruits" }
+  - { query: "golden delicious apples", query_cs: "jablka golden delicious", category: "fruits" }
+  - { query: "granny smith apples", query_cs: "jablka granny smith", category: "fruits" }
+  - { query: "pink lady apples", query_cs: "jablka pink lady", category: "fruits" }
+  - { query: "idared apples", query_cs: "jablka idared", category: "fruits" }
+  - { query: "jonagold apples", query_cs: "jablka jonagold", category: "fruits" }
+  - { query: "bananas", query_cs: "banány", category: "fruits" }
+  - { query: "eating oranges", query_cs: "pomeranče stolní", category: "fruits" }
+  - { query: "juicing oranges", query_cs: "pomeranče na šťávu", category: "fruits" }
+  - { query: "lemons", query_cs: "citrony", category: "fruits" }
+  - { query: "limes", query_cs: "limetky", category: "fruits" }
+  - { query: "mandarins", query_cs: "mandarinky", category: "fruits" }
+  - { query: "grapefruit", query_cs: "grapefruit", category: "fruits" }
+  - { query: "conference pears", query_cs: "hrušky conference", category: "fruits" }
+  - { query: "abate fetel pears", query_cs: "hrušky abate fetel", category: "fruits" }
+  - { query: "white seedless grapes", query_cs: "hroznové víno bílé bezsemenné", category: "fruits" }
+  - { query: "red seedless grapes", query_cs: "hroznové víno červené bezsemenné", category: "fruits" }
+  - { query: "strawberries", query_cs: "jahody", category: "fruits" }
+  - { query: "blueberries", query_cs: "borůvky", category: "fruits" }
+  - { query: "raspberries", query_cs: "maliny", category: "fruits" }
+  - { query: "blackberries", query_cs: "ostružiny", category: "fruits" }
+  - { query: "kiwi", query_cs: "kiwi", category: "fruits" }
+  - { query: "mango", query_cs: "mango", category: "fruits" }
+  - { query: "pineapple", query_cs: "ananas", category: "fruits" }
+  - { query: "hass avocado", query_cs: "avokádo hass", category: "fruits" }
+  - { query: "greenskin avocado", query_cs: "avokádo greenskin", category: "fruits" }
+  - { query: "peaches", query_cs: "broskve", category: "fruits" }
+  - { query: "plums", query_cs: "švestky", category: "fruits" }
+  - { query: "watermelon", query_cs: "vodní meloun", category: "fruits" }
+  - { query: "pomegranate", query_cs: "granátové jablko", category: "fruits" }
 
   # Vegetables (split by variety where applicable)
-  - { query: "salad potatoes", query_cs: "brambory salátové", category: "produce" }
-  - { query: "cooking potatoes", query_cs: "brambory konzumní", category: "produce" }
-  - { query: "sweet potatoes", query_cs: "batáty", category: "produce" }
-  - { query: "yellow onions", query_cs: "žlutá cibule", category: "produce" }
-  - { query: "red onions", query_cs: "červená cibule", category: "produce" }
-  - { query: "spring onions", query_cs: "jarní cibulka", category: "produce" }
-  - { query: "garlic", query_cs: "česnek", category: "produce" }
-  - { query: "vine tomatoes", query_cs: "rajčata keříková", category: "produce" }
-  - { query: "cherry tomatoes", query_cs: "cherry rajčata", category: "produce" }
-  - { query: "beefsteak tomatoes", query_cs: "rajčata masitá", category: "produce" }
-  - { query: "cucumber", query_cs: "okurka hadovka", category: "produce" }
-  - { query: "carrots", query_cs: "mrkev", category: "produce" }
-  - { query: "red bell pepper", query_cs: "paprika červená", category: "produce" }
-  - { query: "yellow bell pepper", query_cs: "paprika žlutá", category: "produce" }
-  - { query: "green bell pepper", query_cs: "paprika zelená", category: "produce" }
-  - { query: "zucchini", query_cs: "cuketa", category: "produce" }
-  - { query: "eggplant", query_cs: "lilek", category: "produce" }
-  - { query: "broccoli", query_cs: "brokolice", category: "produce" }
-  - { query: "cauliflower", query_cs: "květák", category: "produce" }
-  - { query: "spinach", query_cs: "špenát", category: "produce" }
-  - { query: "iceberg lettuce", query_cs: "ledový salát", category: "produce" }
-  - { query: "arugula", query_cs: "rukola", category: "produce" }
-  - { query: "cabbage", query_cs: "zelí", category: "produce" }
-  - { query: "red cabbage", query_cs: "červené zelí", category: "produce" }
-  - { query: "leek", query_cs: "pórek", category: "produce" }
-  - { query: "celery", query_cs: "celer", category: "produce" }
-  - { query: "radish", query_cs: "ředkvičky", category: "produce" }
-  - { query: "mushrooms", query_cs: "žampiony", category: "produce" }
-  - { query: "ginger", query_cs: "zázvor", category: "produce" }
-  - { query: "green beans", query_cs: "zelené fazolky", category: "produce" }
+  - { query: "salad potatoes", query_cs: "brambory salátové", category: "vegetables" }
+  - { query: "cooking potatoes", query_cs: "brambory konzumní", category: "vegetables" }
+  - { query: "sweet potatoes", query_cs: "batáty", category: "vegetables" }
+  - { query: "yellow onions", query_cs: "žlutá cibule", category: "vegetables" }
+  - { query: "red onions", query_cs: "červená cibule", category: "vegetables" }
+  - { query: "spring onions", query_cs: "jarní cibulka", category: "vegetables" }
+  - { query: "garlic", query_cs: "česnek", category: "vegetables" }
+  - { query: "vine tomatoes", query_cs: "rajčata keříková", category: "vegetables" }
+  - { query: "cherry tomatoes", query_cs: "cherry rajčata", category: "vegetables" }
+  - { query: "beefsteak tomatoes", query_cs: "rajčata masitá", category: "vegetables" }
+  - { query: "cucumber", query_cs: "okurka hadovka", category: "vegetables" }
+  - { query: "carrots", query_cs: "mrkev", category: "vegetables" }
+  - { query: "red bell pepper", query_cs: "paprika červená", category: "vegetables" }
+  - { query: "yellow bell pepper", query_cs: "paprika žlutá", category: "vegetables" }
+  - { query: "green bell pepper", query_cs: "paprika zelená", category: "vegetables" }
+  - { query: "zucchini", query_cs: "cuketa", category: "vegetables" }
+  - { query: "eggplant", query_cs: "lilek", category: "vegetables" }
+  - { query: "broccoli", query_cs: "brokolice", category: "vegetables" }
+  - { query: "cauliflower", query_cs: "květák", category: "vegetables" }
+  - { query: "spinach", query_cs: "špenát", category: "vegetables" }
+  - { query: "iceberg lettuce", query_cs: "ledový salát", category: "vegetables" }
+  - { query: "arugula", query_cs: "rukola", category: "vegetables" }
+  - { query: "cabbage", query_cs: "zelí", category: "vegetables" }
+  - { query: "red cabbage", query_cs: "červené zelí", category: "vegetables" }
+  - { query: "leek", query_cs: "pórek", category: "vegetables" }
+  - { query: "celery", query_cs: "celer", category: "vegetables" }
+  - { query: "radish", query_cs: "ředkvičky", category: "vegetables" }
+  - { query: "mushrooms", query_cs: "žampiony", category: "vegetables" }
+  - { query: "ginger", query_cs: "zázvor", category: "vegetables" }
+  - { query: "green beans", query_cs: "zelené fazolky", category: "vegetables" }
 
   # Grains, Rice, Pasta & Legumes
   - { query: "basmati rice", query_cs: "basmati rýže", category: "pantry" }
@@ -229,3 +229,16 @@ groceries:
   - { query: "orange juice", query_cs: "pomerančový džus", category: "beverages" }
   - { query: "apple juice", query_cs: "jablečný džus", category: "beverages" }
   - { query: "pilsner urquell", query_cs: "pilsner urquell", category: "beverages" }
+
+  # Household & Personal Care Goods
+  - { query: "toothpaste", query_cs: "zubní pasta", category: "goods" }
+  - { query: "liquid hand soap", query_cs: "tekuté mýdlo", category: "goods" }
+  - { query: "bar soap", query_cs: "tuhé mýdlo", category: "goods" }
+  - { query: "shampoo", query_cs: "šampon", category: "goods" }
+  - { query: "shower gel", query_cs: "sprchový gel", category: "goods" }
+  - { query: "laundry detergent", query_cs: "prací prášek", category: "goods" }
+  - { query: "dish soap", query_cs: "prostředek na nádobí", category: "goods" }
+  - { query: "toilet paper", query_cs: "toaletní papír", category: "goods" }
+  - { query: "paper towels", query_cs: "kuchyňské utěrky", category: "goods" }
+  - { query: "trash bags", query_cs: "pytle na odpadky", category: "goods" }
+  - { query: "deodorant", query_cs: "deodorant", category: "goods" }

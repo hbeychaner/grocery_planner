@@ -12,15 +12,70 @@ document.addEventListener("DOMContentLoaded", () => {
   const chartSubtitle = document.getElementById("chart-subtitle");
   const daysSelect = document.getElementById("days-select");
   const snapshotsTbody = document.getElementById("snapshots-tbody");
+  const analyticsTbody = document.getElementById("analytics-tbody");
+  const btnClearCat = document.getElementById("btn-clear-cat");
   const chartCanvas = document.getElementById("price-chart");
 
   let allItems = [];
   let selectedQuery = null;
+  let selectedCategory = null;
   let priceChart = null;
 
-  async function loadWatchlist() {
-    const resp = await fetch("/api/v1/history/items");
+  async function loadAnalytics() {
+    const resp = await fetch("/api/v1/history/analytics");
     const data = await resp.json();
+    const rows = [data.overall, ...(data.categories || [])];
+
+    const fmtPrice = (val) => (val !== null && val !== undefined) ? `${val.toFixed(2)} CZK` : "—";
+    const fmtWow = (val) => {
+      if (val === null || val === undefined) return '<span style="color:#94a3b8;">Baseline</span>';
+      const sign = val > 0 ? "+" : "";
+      const color = val > 0 ? "#dc2626" : (val < 0 ? "#16a34a" : "#475569");
+      return `<span style="color:${color}; font-weight:600;">${sign}${val.toFixed(2)}%</span>`;
+    };
+
+    analyticsTbody.innerHTML = rows.map((row, idx) => {
+      const isOverall = idx === 0;
+      const isSelected = selectedCategory === row.category || (isOverall && !selectedCategory);
+      const bg = isOverall ? "#f8fafc" : (isSelected ? "#eef2ff" : "transparent");
+      const weight = isOverall ? "700" : "500";
+      return `
+        <tr data-category="${row.category}" style="border-bottom: 1px solid #f1f5f9; background:${bg}; font-weight:${weight}; cursor:pointer;">
+          <td style="padding: 8px;">${row.display_name}</td>
+          <td style="padding: 8px;">${row.item_count}</td>
+          <td style="padding: 8px;">${fmtPrice(row.avg_rohlik_unit_price)}</td>
+          <td style="padding: 8px;">${fmtPrice(row.avg_kosik_unit_price)}</td>
+          <td style="padding: 8px; font-weight:700;">${fmtPrice(row.blended_avg_unit_price)}</td>
+          <td style="padding: 8px; color:#166534;">${fmtPrice(row.avg_bio_unit_price)}</td>
+          <td style="padding: 8px;">${fmtWow(row.wow_change_pct)}</td>
+        </tr>
+      `;
+    }).join("");
+
+    analyticsTbody.querySelectorAll("tr[data-category]").forEach(tr => {
+      tr.addEventListener("click", () => {
+        const cat = tr.getAttribute("data-category");
+        selectedCategory = (cat === "overall") ? null : cat;
+        btnClearCat.classList.toggle("hidden", !selectedCategory);
+        renderWatchlist();
+        loadAnalytics();
+      });
+    });
+  }
+
+  btnClearCat.addEventListener("click", () => {
+    selectedCategory = null;
+    btnClearCat.classList.add("hidden");
+    renderWatchlist();
+    loadAnalytics();
+  });
+
+  async function loadWatchlist() {
+    const [itemsResp] = await Promise.all([
+      fetch("/api/v1/history/items"),
+      loadAnalytics(),
+    ]);
+    const data = await itemsResp.json();
     statItems.textContent = data.stats.tracked_items_count;
     statSnapshots.textContent = data.stats.total_snapshots;
     statLastRun.textContent = data.stats.last_recorded_at || "Never";
@@ -39,10 +94,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function renderWatchlist() {
     const filter = (filterInput.value || "").trim().toLowerCase();
-    const filtered = allItems.filter(item =>
-      item.query.toLowerCase().includes(filter) ||
-      (item.query_cs && item.query_cs.toLowerCase().includes(filter))
-    );
+    const filtered = allItems.filter(item => {
+      const matchesCat = !selectedCategory || item.category === selectedCategory;
+      const matchesText = item.query.toLowerCase().includes(filter) ||
+        (item.query_cs && item.query_cs.toLowerCase().includes(filter));
+      return matchesCat && matchesText;
+    });
 
     watchlistContainer.innerHTML = filtered.map(item => {
       const isSelected = item.query === selectedQuery;

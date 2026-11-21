@@ -122,6 +122,12 @@ async def test_trends_page_and_history_endpoints() -> None:
         data = items_resp.json()
         assert data["stats"]["tracked_items_count"] > 0
 
+        analytics_resp = await ac.get("/api/v1/history/analytics")
+        assert analytics_resp.status_code == 200
+        analytics = analytics_resp.json()
+        assert analytics["overall"]["category"] == "overall"
+        assert len(analytics["categories"]) > 0
+
 
 def test_price_history_separates_bio_and_regular_series() -> None:
     history = PriceHistoryService(db_path=Path(":memory:"))
