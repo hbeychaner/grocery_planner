@@ -45,20 +45,24 @@ document.addEventListener("DOMContentLoaded", () => {
     currentVoiceText = data.voice_summary_en || "No voice summary available.";
     voiceText.textContent = currentVoiceText;
 
-    // Winner banner
+    // Winner banner (only display when there is a distinct price advantage)
     winnerBanner.className = "winner-banner";
-    if (data.advantage === "rohlik_cheaper") {
+    const unit = (data.primary_pair && data.primary_pair.rohlik_product && data.primary_pair.rohlik_product.unit_type)
+      || (data.primary_pair && data.primary_pair.kosik_product && data.primary_pair.kosik_product.unit_type)
+      || "kg";
+
+    if (data.advantage === "rohlik_cheaper" && data.price_difference && parseFloat(data.price_difference) > 0) {
+      winnerBanner.classList.remove("hidden");
       winnerBanner.classList.add("rohlik");
-      winnerBanner.innerHTML = `🏆 <strong>Rohlík is cheaper!</strong> Save ${data.price_difference} CZK/kg (${data.percentage_savings}%) on unit price.`;
-    } else if (data.advantage === "kosik_cheaper") {
+      winnerBanner.innerHTML = `🏆 <strong>Rohlík is cheaper!</strong> Save ${data.price_difference} CZK/${unit} (${data.percentage_savings}%) on unit price.`;
+    } else if (data.advantage === "kosik_cheaper" && data.price_difference && parseFloat(data.price_difference) > 0) {
+      winnerBanner.classList.remove("hidden");
       winnerBanner.classList.add("kosik");
-      winnerBanner.innerHTML = `🏆 <strong>Košík is cheaper!</strong> Save ${data.price_difference} CZK/kg (${data.percentage_savings}%) on unit price.`;
-    } else if (data.advantage === "tied") {
-      winnerBanner.classList.add("tied");
-      winnerBanner.innerHTML = `⚖️ <strong>It's a tie!</strong> Both supermarkets offer the same unit price.`;
+      winnerBanner.innerHTML = `🏆 <strong>Košík is cheaper!</strong> Save ${data.price_difference} CZK/${unit} (${data.percentage_savings}%) on unit price.`;
     } else {
-      winnerBanner.classList.add("tied");
-      winnerBanner.innerHTML = `ℹ️ Item found in only one store or not found.`;
+      // Hide banner on ties or when neither store has a clear advantage
+      winnerBanner.classList.add("hidden");
+      winnerBanner.innerHTML = "";
     }
 
     // Use ranked lists for display (fall back to candidates if ranked is empty)
