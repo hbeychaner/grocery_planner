@@ -36,7 +36,6 @@ _comparator_service = PriceComparisonService(
 )
 _price_history_service = PriceHistoryService()
 _price_history_service.seed_from_yaml(settings.tracked_groceries_config_path)
-_price_history_service.seed_default_items(BilingualQueryService.DICTIONARY)
 
 # Pre-warm translation cache with all tracked groceries so weekly runs avoid LLM latency
 if settings.tracked_groceries_config_path.exists():

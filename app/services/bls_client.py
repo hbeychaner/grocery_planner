@@ -32,6 +32,13 @@ BLS_SERIES_MAP: Dict[str, Tuple[str, str, float, str, str]] = {
     "APU0000717311": ("ground coffee", "Coffee, 100% ground roast", LB_TO_KG, "kg", "lb"),
     "APU0000704111": ("bacon", "Bacon, sliced", LB_TO_KG, "kg", "lb"),
     "APU0000FS1101": ("butter", "Butter, salted", LB_TO_KG, "kg", "lb"),
+    "APU0000710411": ("ice cream", "Ice cream, prepackaged, bulk", 1.0 / (GAL_TO_L * 0.5), "l", "1/2 gal"),
+    "APU0000710212": ("cheddar", "Cheddar cheese, natural", LB_TO_KG, "kg", "lb"),
+    "APU0000715211": ("sugar", "Sugar, white", LB_TO_KG, "kg", "lb"),
+    "APU0000702421": ("butter cookies", "Cookies, chocolate chip", LB_TO_KG, "kg", "lb"),
+    "APU0000704211": ("pork tenderloin", "Pork chops, center cut", LB_TO_KG, "kg", "lb"),
+    "APU0000703112": ("minced beef", "Ground beef, 100% beef", LB_TO_KG, "kg", "lb"),
+    "APU0000711411": ("lemons", "Lemons", LB_TO_KG, "kg", "lb"),
 }
 
 

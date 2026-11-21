@@ -88,7 +88,69 @@ class CsuPriceIngestionService:
     def _match_tracked_query(
         self, csu_name: str, tracked_items: List[Tuple[str, Optional[str]]]
     ) -> Optional[str]:
-        """Pair a ČSÚ item name to the closest tracked grocery using spaCy lemmas + semantic similarity."""
+        """Pair a ČSÚ item name to the closest tracked grocery using canonical mappings + spaCy."""
+        lower_name = csu_name.strip().lower()
+
+        # Explicit exclusions for non-equivalent items (e.g., infant formula, condensed milk)
+        if any(skip in lower_name for skip in ("kojeneckou", "kondenzované", "dětská výživa")):
+            return None
+
+        # Canonical ČSÚ item prefix -> tracked_groceries.yaml query
+        CANONICAL_CSU_MAP: List[Tuple[str, str]] = [
+            ("rýže loupaná dlouhozrnná", "parboiled rice"),
+            ("pšeničná mouka hladká", "plain flour"),
+            ("chléb konzumní kmínový", "bread"),
+            ("sušenky slepované", "butter cookies"),
+            ("těstoviny vaječné", "spaghetti"),
+            ("hovězí maso zadní", "minced beef"),
+            ("kuřecí prsní řízky", "chicken breast"),
+            ("kuřecí stehna", "chicken thighs"),
+            ("krůtí prsní řízky", "turkey breast"),
+            ("šunka vepřová", "ham"),
+            ("losos filet", "salmon"),
+            ("mléko plnotučné", "whole milk"),
+            ("mléko polotučné pasterované", "semi-skimmed milk"),
+            ("smetana sladká trvanlivá", "heavy cream"),
+            ("eidamská cihla", "eidam cheese"),
+            ("lučina", "cream cheese"),
+            ("gouda", "gouda"),
+            ("tvaroh měkký", "quark"),
+            ("jogurt bílý", "white yogurt"),
+            ("vejce slepičí", "eggs"),
+            ("olej rostlinný", "sunflower oil"),
+            ("máslo", "butter"),
+            ("rostlinný roztíratelný tuk", "margarine"),
+            ("banány žluté", "bananas"),
+            ("pomeranče", "eating oranges"),
+            ("citrony", "lemons"),
+            ("jablka konzumní", "gala apples"),
+            ("hrozny stolní", "white seedless grapes"),
+            ("zelí hlávkové", "cabbage"),
+            ("květák bílý", "cauliflower"),
+            ("brokolice", "broccoli"),
+            ("salát ledový", "iceberg lettuce"),
+            ("rajská jablka", "vine tomatoes"),
+            ("okurky salátové", "cucumber"),
+            ("papriky", "red bell pepper"),
+            ("mrkev", "carrots"),
+            ("celer", "celery"),
+            ("cibule suchá", "yellow onions"),
+            ("česnek suchý", "garlic"),
+            ("konzumní brambory", "cooking potatoes"),
+            ("cukr krystalový", "sugar"),
+            ("cukr moučkový", "powdered sugar"),
+            ("pravý včelí med", "honey"),
+            ("čokoláda mléčná", "milk chocolate"),
+            ("kakaový prášek", "cocoa powder"),
+            ("káva zrnková", "coffee beans"),
+            ("čaj černý", "black tea"),
+            ("pivo výčepní", "pilsner urquell"),
+        ]
+        tracked_set = {q for q, _ in tracked_items}
+        for prefix, target_q in CANONICAL_CSU_MAP:
+            if lower_name.startswith(prefix) and target_q in tracked_set:
+                return target_q
+
         csu_lemmas = self.matcher.get_lemmas(csu_name, "cs")
         best_query: Optional[str] = None
         best_score = 0.0
