@@ -32,11 +32,10 @@ def create_mcp_server(
         # Exclude all non-GET methods and non-/api/v1/ routes
         RouteMap(methods="*", pattern=r".*", mcp_type=MCPType.EXCLUDE),
     ]
-    httpx_kwargs = (
-        {"headers": {"X-Internal-MCP-Token": internal_token}}
-        if internal_token
-        else None
-    )
+    httpx_kwargs = {
+        "timeout": 30.0,
+        **({"headers": {"X-Internal-MCP-Token": internal_token}} if internal_token else {}),
+    }
     return FastMCP.from_fastapi(
         app=fastapi_app,
         name="GroceryPriceComparatorMCP",

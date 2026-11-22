@@ -339,8 +339,25 @@ class GroceryA2AExecutor(AgentExecutor):
         await updater.start_work()
         try:
             user_text = context.get_user_input() or ""
-            reply = await self.agent.run(user_text, context_id=context_id)
-            msg = updater.new_agent_message([Part(text=reply)])
+            final_reply = "I couldn't generate a response."
+            async for ev in self.agent.stream_events(user_text):
+                ev_type = ev.get("type")
+                if ev_type == "thought":
+                    await updater.update_status(
+                        TaskState.TASK_STATE_WORKING,
+                        message=updater.new_agent_message([Part(text=ev.get("text", ""))]),
+                    )
+                elif ev_type == "tool_call":
+                    await updater.update_status(
+                        TaskState.TASK_STATE_WORKING,
+                        message=updater.new_agent_message(
+                            [Part(text=f"Calling tool: {ev.get('name')}")]
+                        ),
+                    )
+                elif ev_type == "answer":
+                    final_reply = ev.get("text") or final_reply
+            await updater.add_artifact([Part(text=final_reply)], name="response")
+            msg = updater.new_agent_message([Part(text=final_reply)])
             await updater.complete(msg)
         except Exception as exc:
             logger.exception("A2A agent execution failed: %s", exc)
@@ -368,7 +385,7 @@ def create_agent_card(base_url: str = "http://localhost:8000") -> AgentCard:
             AgentInterface(protocol_binding="JSONRPC", protocol_version="1.0", url=f"{base_url}/a2a"),
             AgentInterface(protocol_binding="HTTP+JSON", protocol_version="1.0", url=f"{base_url}/a2a/rest"),
         ],
-        capabilities=AgentCapabilities(streaming=False, push_notifications=False),
+        capabilities=AgentCapabilities(streaming=True, push_notifications=False),
         default_input_modes=["text/plain"],
         default_output_modes=["text/plain"],
         skills=[
