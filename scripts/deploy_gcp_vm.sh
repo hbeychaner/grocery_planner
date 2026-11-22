@@ -102,14 +102,15 @@ fi
 echo "==> Provisioning VM (domain: $DEFAULT_DOMAIN)..."
 gcloud compute ssh "$VM_NAME" --zone="$ZONE" --project="$PROJECT_ID" --command="bash -s" <<REMOTE_EOF
 set -euo pipefail
-sudo apt-get update -qq
-sudo apt-get install -y -qq python3 python3-venv python3-pip debian-keyring debian-archive-keyring apt-transport-https curl
+export DEBIAN_FRONTEND=noninteractive
+sudo -E apt-get update -qq
+sudo -E apt-get install -y -qq python3 python3-venv python3-pip debian-keyring debian-archive-keyring apt-transport-https curl
 
 # Install Caddy if missing
 if ! command -v caddy >/dev/null 2>&1; then
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
-  sudo apt-get update -qq && sudo apt-get install -y -qq caddy
+  sudo -E apt-get update -qq && sudo -E apt-get install -y -qq caddy
 fi
 
 # Add 2GB swap on e2-micro for safety
