@@ -10,7 +10,7 @@ Follows FastMCP best practices:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from fastmcp import FastMCP
 from fastmcp.server.providers.openapi import MCPType, RouteMap
@@ -19,18 +19,29 @@ if TYPE_CHECKING:
     from fastapi import FastAPI
 
 
-def create_mcp_server(fastapi_app: FastAPI) -> FastMCP:
+def create_mcp_server(
+    fastapi_app: FastAPI,
+    internal_token: Optional[str] = None,
+) -> FastMCP:
     """Build a FastMCP server from the existing FastAPI application."""
     route_maps = [
-        # Expose all /api/v1/* endpoints as MCP tools
+        # Exclude auth endpoints from LLM tool surface
+        RouteMap(pattern=r"^/api/v1/auth/.*", mcp_type=MCPType.EXCLUDE),
+        # Expose all remaining /api/v1/* endpoints as MCP tools
         RouteMap(pattern=r"^/api/v1/.*", mcp_type=MCPType.TOOL),
         # Exclude UI, health, A2A, and docs routes from MCP tool surface
         RouteMap(pattern=r"^/(?!api/v1/).*", mcp_type=MCPType.EXCLUDE),
     ]
+    httpx_kwargs = (
+        {"headers": {"X-Internal-MCP-Token": internal_token}}
+        if internal_token
+        else None
+    )
     return FastMCP.from_fastapi(
         app=fastapi_app,
         name="GroceryPriceComparatorMCP",
         route_maps=route_maps,
+        httpx_client_kwargs=httpx_kwargs,
     )
 
 

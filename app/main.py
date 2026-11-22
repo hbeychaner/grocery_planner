@@ -97,6 +97,7 @@ app = FastAPI(
 )
 
 
+_INTERNAL_MCP_TOKEN = secrets.token_urlsafe(32)
 _RATE_LIMIT_BUCKETS: Dict[str, Deque[float]] = defaultdict(deque)
 _EXPENSIVE_PATHS = (
     "/a2a",
@@ -120,10 +121,13 @@ async def security_and_cache_middleware(request: Request, call_next: Any) -> Res
     # Require authenticated session (or API token) for protected API & A2A routes when enabled
     if settings.require_auth and (
         path.startswith("/api/v1/compare")
+        or path.startswith("/api/v1/discounts")
         or path.startswith("/api/v1/history")
         or path.startswith("/api/v1/staples")
         or path.startswith("/a2a")
     ):
+        mcp_tok = request.headers.get("X-Internal-MCP-Token", "")
+        has_internal_mcp = bool(mcp_tok and secrets.compare_digest(mcp_tok, _INTERNAL_MCP_TOKEN))
         session_cookie = request.cookies.get("gp_session")
         user = get_auth_service().get_user_by_session(session_cookie)
         auth_header = request.headers.get("Authorization", "")
@@ -135,7 +139,7 @@ async def security_and_cache_middleware(request: Request, call_next: Any) -> Res
             and provided_tok
             and secrets.compare_digest(provided_tok, settings.api_auth_token)
         )
-        if user is None and not has_api_token:
+        if user is None and not has_api_token and not has_internal_mcp:
             return JSONResponse(status_code=401, content={"detail": "Authentication required"})
 
     # Optional bearer / X-API-Key protection on mutating / ingestion endpoints
@@ -202,7 +206,7 @@ app.include_router(api_v1_router)
 app.include_router(google_oauth_router)
 
 # Build and mount FastMCP server (exposing /api/v1/* as MCP tools at /mcp)
-mcp_server = create_mcp_server(app)
+mcp_server = create_mcp_server(app, internal_token=_INTERNAL_MCP_TOKEN)
 mcp_app = mcp_server.http_app(path="/")
 app.mount("/mcp", mcp_app)
 
