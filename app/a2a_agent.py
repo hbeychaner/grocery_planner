@@ -33,8 +33,16 @@ from a2a.types import (
     TaskState,
     TaskStatus,
 )
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastmcp import Client, FastMCP
+from pydantic import BaseModel
+
+
+class ChatStreamRequest(BaseModel):
+    """Request payload for streaming grocery assistant chat."""
+
+    message: str
 from fastmcp.client.transports import StreamableHttpTransport
 
 from app.core.config import settings
@@ -399,25 +407,12 @@ def mount_a2a_agent(
         task_store=InMemoryTaskStore(),
         agent_card=agent_card,
     )
-    add_a2a_routes_to_fastapi(
-        fastapi_app,
-        agent_card_routes=create_agent_card_routes(agent_card),
-        jsonrpc_routes=create_jsonrpc_routes(request_handler, rpc_url="/a2a", enable_v0_3_compat=True),
-        rest_routes=create_rest_routes(request_handler, path_prefix="/a2a/rest", enable_v0_3_compat=True),
-    )
-
-    from fastapi import Request
-    from fastapi.responses import JSONResponse, StreamingResponse
-    from pydantic import BaseModel
     from app.api.deps import get_auth_service
 
-    class _ChatStreamRequest(BaseModel):
-        message: str
-
-    @fastapi_app.post("/a2a/stream", include_in_schema=False)
+    @fastapi_app.post("/api/v1/chat/stream", include_in_schema=False)
     async def stream_agent_chat(
         request: Request,
-        payload: _ChatStreamRequest,
+        payload: ChatStreamRequest,
     ) -> Any:
         auth_svc = get_auth_service()
         user = auth_svc.get_user_by_session(request.cookies.get("gp_session"))
@@ -446,5 +441,13 @@ def mount_a2a_agent(
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
+
+    # Register after explicit routes because a2a-sdk mounts a catch-all /{tenant} route.
+    add_a2a_routes_to_fastapi(
+        fastapi_app,
+        agent_card_routes=create_agent_card_routes(agent_card),
+        jsonrpc_routes=create_jsonrpc_routes(request_handler, rpc_url="/a2a", enable_v0_3_compat=True),
+        rest_routes=create_rest_routes(request_handler, path_prefix="/a2a/rest", enable_v0_3_compat=True),
+    )
 
     return agent_card

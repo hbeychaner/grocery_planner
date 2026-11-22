@@ -97,7 +97,7 @@ export async function streamAgentChat(
   message: string,
   onEvent: (event: AgentStreamEvent) => void
 ): Promise<void> {
-  const resp = await fetch("/a2a/stream", {
+  const resp = await fetch("/api/v1/chat/stream", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ message }),

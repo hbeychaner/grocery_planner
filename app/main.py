@@ -124,6 +124,7 @@ async def security_and_cache_middleware(request: Request, call_next: Any) -> Res
         or path.startswith("/api/v1/discounts")
         or path.startswith("/api/v1/history")
         or path.startswith("/api/v1/staples")
+        or path.startswith("/api/v1/chat")
         or path.startswith("/a2a")
     ):
         mcp_tok = request.headers.get("X-Internal-MCP-Token", "")
