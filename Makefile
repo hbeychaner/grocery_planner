@@ -24,8 +24,8 @@ help:
 	@echo "  make langfuse-down Stop self-hosted Langfuse Docker containers"
 	@echo "  make open-browser  Open Frontend, API Docs, and Langfuse in Google Chrome"
 	@echo "  make health        Check /health endpoint, Langfuse, and Ollama status"
-	@echo "  make test          Run offline pytest suite
-  make track-prices  Run weekly grocery price tracking sweep (all items)"
+	@echo "  make test          Run offline pytest suite"
+	@echo "  make track-prices  Run weekly grocery price tracking sweep (all items)"
 
 langfuse-up:
 	@echo "Starting self-hosted Langfuse (Docker Compose)..."
