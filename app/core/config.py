@@ -46,6 +46,10 @@ class AppSettings(BaseSettings):
     gemini_model: str = Field(default="gemini-3.5-flash", alias="GEMINI_MODEL")
     mcp_server_url: Optional[str] = Field(default=None, alias="MCP_SERVER_URL")
 
+    # Security & Rate Limiting
+    api_auth_token: Optional[str] = Field(default=None, alias="API_AUTH_TOKEN")
+    rate_limit_per_minute: int = Field(default=60, alias="RATE_LIMIT_PER_MINUTE")
+
     # Language & Translation Cache Configuration
     default_catalog_language: str = Field(default="cs", alias="DEFAULT_CATALOG_LANGUAGE")
     supported_languages: List[str] = Field(default=["en", "cs"], alias="SUPPORTED_LANGUAGES")

@@ -448,7 +448,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   btnSyncCsu.addEventListener("click", async () => {
     btnSyncCsu.disabled = true;
-    btnSyncCsu.textContent = "⏳ Syncing ČSÚ...";
+    btnSyncCsu.textContent = "Syncing ČSÚ...";
     runStatus.classList.remove("hidden");
     runStatus.textContent = "Fetching historical Czech averages from ČSÚ DataStat API...";
     try {
@@ -460,13 +460,13 @@ document.addEventListener("DOMContentLoaded", () => {
       runStatus.textContent = `ČSÚ sync failed: ${err.message}`;
     } finally {
       btnSyncCsu.disabled = false;
-      btnSyncCsu.textContent = "⬇ Sync ČSÚ History";
+      btnSyncCsu.textContent = "Sync ČSÚ";
     }
   });
 
   btnSyncBls.addEventListener("click", async () => {
     btnSyncBls.disabled = true;
-    btnSyncBls.textContent = "⏳ Syncing US...";
+    btnSyncBls.textContent = "Syncing US...";
     runStatus.classList.remove("hidden");
     runStatus.textContent = "Fetching US BLS averages & historical USD->CZK exchange rates...";
     try {
@@ -478,13 +478,13 @@ document.addEventListener("DOMContentLoaded", () => {
       runStatus.textContent = `US BLS sync failed: ${err.message}`;
     } finally {
       btnSyncBls.disabled = false;
-      btnSyncBls.textContent = "🇺🇸 Sync US (BLS)";
+      btnSyncBls.textContent = "Sync US (BLS)";
     }
   });
 
   btnRunCheck.addEventListener("click", async () => {
     btnRunCheck.disabled = true;
-    btnRunCheck.textContent = "⏳ Checking...";
+    btnRunCheck.textContent = "Checking...";
     runStatus.classList.remove("hidden");
     runStatus.textContent = "Running price check across sample of 10 tracked groceries...";
     const pollTimer = setInterval(loadWatchlist, 3000);
@@ -498,7 +498,7 @@ document.addEventListener("DOMContentLoaded", () => {
     } finally {
       clearInterval(pollTimer);
       btnRunCheck.disabled = false;
-      btnRunCheck.textContent = "▶ Run Check (Sample 10)";
+      btnRunCheck.textContent = "Run Check (10)";
     }
   });
 

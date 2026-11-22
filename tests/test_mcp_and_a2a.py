@@ -109,3 +109,22 @@ def test_create_llm_service_switches_providers() -> None:
 
     assert isinstance(create_llm_service("ollama"), OllamaLLMService)
     assert isinstance(create_llm_service("gemini"), GeminiLLMService)
+
+
+@pytest.mark.asyncio
+async def test_security_headers_and_optional_api_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Middleware must set security headers and enforce API_AUTH_TOKEN on admin endpoints when configured."""
+    from app.core.config import settings
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/.well-known/agent-card.json")
+        assert resp.headers.get("X-Content-Type-Options") == "nosniff"
+        assert resp.headers.get("X-Frame-Options") == "DENY"
+        assert "default-src 'self'" in (resp.headers.get("Content-Security-Policy") or "")
+
+        monkeypatch.setattr(settings, "api_auth_token", "secret-token-123")
+        unauth = await ac.post("/api/v1/history/run")
+        assert unauth.status_code == 401
+        bad = await ac.post("/api/v1/history/run", headers={"X-API-Key": "wrong"})
+        assert bad.status_code == 401

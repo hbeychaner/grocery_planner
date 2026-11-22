@@ -256,7 +256,9 @@ class GroceryA2AExecutor(AgentExecutor):
             await updater.complete(msg)
         except Exception as exc:
             logger.exception("A2A agent execution failed: %s", exc)
-            err_msg = updater.new_agent_message([Part(text=f"Agent error: {exc}")])
+            err_msg = updater.new_agent_message(
+                [Part(text="An internal error occurred while processing your request.")]
+            )
             await updater.failed(err_msg)
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:

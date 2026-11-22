@@ -1,6 +1,9 @@
+from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, AsyncGenerator, Dict
+import secrets
+import time
+from typing import Any, AsyncGenerator, Deque, Dict
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -50,11 +53,67 @@ app = FastAPI(
 )
 
 
+_RATE_LIMIT_BUCKETS: Dict[str, Deque[float]] = defaultdict(deque)
+_EXPENSIVE_PATHS = (
+    "/a2a",
+    "/api/v1/compare",
+    "/api/v1/history/run",
+    "/api/v1/history/ingest-csu",
+    "/api/v1/history/ingest-bls",
+)
+_ADMIN_PATHS = (
+    "/api/v1/history/run",
+    "/api/v1/history/ingest-csu",
+    "/api/v1/history/ingest-bls",
+)
+
+
 @app.middleware("http")
-async def add_cache_control_headers(request: Request, call_next: Any) -> Response:
-    """Disable aggressive browser caching for static files and frontend in development."""
+async def security_and_cache_middleware(request: Request, call_next: Any) -> Response:
+    """Enforce optional API key on admin mutations, rate limiting, security headers, and dev cache control."""
+    path = request.url.path
+
+    # Optional bearer / X-API-Key protection on mutating / ingestion endpoints
+    if settings.api_auth_token and (
+        path in _ADMIN_PATHS
+        or (request.method == "DELETE" and path.startswith("/api/v1/history/items/"))
+    ):
+        auth_header = request.headers.get("Authorization", "")
+        bearer = auth_header[7:].strip() if auth_header.startswith("Bearer ") else ""
+        api_key = request.headers.get("X-API-Key", "")
+        provided = bearer or api_key
+        if not provided or not secrets.compare_digest(provided, settings.api_auth_token):
+            return JSONResponse(status_code=401, content={"detail": "Invalid or missing API token"})
+
+    # Sliding-window per-IP rate limiting on expensive / LLM / ingestion endpoints
+    if request.method == "POST" and any(path.startswith(p) for p in _EXPENSIVE_PATHS):
+        client_ip = request.client.host if request.client else "unknown"
+        now = time.monotonic()
+        bucket = _RATE_LIMIT_BUCKETS[client_ip]
+        while bucket and (now - bucket[0]) > 60.0:
+            bucket.popleft()
+        if len(bucket) >= settings.rate_limit_per_minute:
+            return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded. Try again shortly."})
+        bucket.append(now)
+
     response = await call_next(request)
-    if request.url.path.startswith("/static") or request.url.path in ("/", "/trends"):
+
+    # Security headers
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' https: data:; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none'"
+    )
+
+    if path.startswith("/static") or path in ("/", "/trends"):
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"

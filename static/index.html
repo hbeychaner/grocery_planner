@@ -15,15 +15,15 @@
     <!-- Header -->
     <header class="app-header">
       <div class="brand">
-        <span class="brand-icon">🛒</span>
         <div>
-          <h1>Grocery Price Comparator</h1>
-          <p class="subtitle">Košík.cz vs. Rohlík.cz &bull; <span class="badge-location">📍 Prague (Vinohrady)</span></p>
+          <h1>Grocery Planner</h1>
+          <p class="subtitle">Košík.cz vs. Rohlík.cz &bull; <span class="badge-location">Prague (Vinohrady)</span></p>
         </div>
       </div>
       <div class="header-actions">
-        <a href="/trends" class="btn btn-primary">📈 Price Trends</a>
-        <a href="/docs" target="_blank" class="btn btn-outline">API Docs</a>
+        <a href="/" class="btn btn-outline">Compare</a>
+        <a href="/trends" class="btn btn-primary">Price Trends</a>
+        <a href="/docs" target="_blank" rel="noopener noreferrer" class="btn btn-outline">API Docs</a>
       </div>
     </header>
 
@@ -31,7 +31,6 @@
     <section class="search-section">
       <form id="search-form" class="search-form">
         <div class="search-input-wrapper">
-          <span class="search-icon">🔍</span>
           <input 
             type="text" 
             id="search-input" 
@@ -47,11 +46,11 @@
       <div class="staples-wrapper">
         <span class="staples-label">Quick Staples:</span>
         <div id="staples-list" class="staples-chips">
-          <button class="chip" data-query="butter">🧈 Butter</button>
-          <button class="chip" data-query="whole milk">🥛 Milk</button>
-          <button class="chip" data-query="eggs">🥚 Eggs</button>
-          <button class="chip" data-query="pilsner urquell">🍺 Pilsner</button>
-          <button class="chip" data-query="bananas">🍌 Bananas</button>
+          <button class="chip" data-query="butter">Butter</button>
+          <button class="chip" data-query="whole milk">Milk</button>
+          <button class="chip" data-query="eggs">Eggs</button>
+          <button class="chip" data-query="pilsner urquell">Pilsner</button>
+          <button class="chip" data-query="bananas">Bananas</button>
         </div>
       </div>
     </section>
@@ -94,7 +93,7 @@
       <section class="store-card" style="margin-top: 24px; padding: 20px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
           <div>
-            <h3 style="font-size: 1.05rem;">🏷️ Brick-and-Mortar Supermarket Deals (Kupi.cz)</h3>
+            <h3 style="font-size: 1.05rem;">Brick-and-Mortar Supermarket Deals (Kupi.cz)</h3>
             <p style="font-size: 0.85rem; color: #64748b;">Active promotions across Tesco, Lidl, Penny, Kaufland, Billa &amp; Albert</p>
           </div>
         </div>
@@ -104,7 +103,7 @@
 
     <!-- Footer -->
     <footer class="app-footer">
-      <p>Grocery Price Comparator &bull; Built with FastAPI, Pydantic & Docker</p>
+      <p>Grocery Planner &bull; Prague Supermarket Price Intelligence</p>
     </footer>
   </div>
 
@@ -112,16 +111,16 @@
   <aside class="chat-sidebar" aria-label="Grocery AI Assistant">
     <div class="chat-header">
       <div>
-        <h2>🤖 Grocery AI Assistant</h2>
+        <h2>Grocery AI Assistant</h2>
         <p class="chat-subtitle">A2A Agent &bull; FastMCP &bull; Gemini 3.5 Flash</p>
       </div>
       <span class="chat-badge" id="chat-agent-status">A2A Ready</span>
     </div>
 
     <div class="chat-suggestions" id="chat-suggestions">
-      <button type="button" class="chip chat-chip" data-prompt="Compare butter prices between Rohlík and Košík">🧈 Butter?</button>
-      <button type="button" class="chip chat-chip" data-prompt="Where is whole milk cheaper right now?">🥛 Milk?</button>
-      <button type="button" class="chip chat-chip" data-prompt="Show me dairy price trends in comparison mode">📈 Dairy trends</button>
+      <button type="button" class="chip chat-chip" data-prompt="Compare butter prices between Rohlík and Košík">Butter prices</button>
+      <button type="button" class="chip chat-chip" data-prompt="Where is whole milk cheaper right now?">Whole milk</button>
+      <button type="button" class="chip chat-chip" data-prompt="Show me dairy price trends in comparison mode">Dairy trends</button>
     </div>
 
     <div id="chat-messages" class="chat-messages">

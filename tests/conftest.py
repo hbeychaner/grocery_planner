@@ -1,10 +1,22 @@
 from decimal import Decimal
+from pathlib import Path
 from typing import List, Optional
 import pytest
 
+from app.api import deps
 from app.clients.base import BaseStoreClient
+from app.core.config import settings
 from app.models.enums import StoreType, UnitType
 from app.models.product import StoreProduct
+
+
+@pytest.fixture(autouse=True)
+def _isolate_test_telemetry(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Prevent unit tests from writing test items to live Langfuse or data/relevance_training.jsonl."""
+    monkeypatch.setattr(settings, "langfuse_enabled", False)
+    monkeypatch.setattr(settings, "relevance_dataset_path", tmp_path / "relevance_training.jsonl")
+    monkeypatch.setattr(deps._monitoring_service, "enabled", False)
+    monkeypatch.setattr(deps._monitoring_service, "_client", None)
 
 
 class MockStoreClient(BaseStoreClient):
