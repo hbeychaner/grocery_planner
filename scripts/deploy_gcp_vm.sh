@@ -7,6 +7,7 @@ set -euo pipefail
 #   ZONE=europe-central2-a REGION=europe-central2 ./scripts/deploy_gcp_vm.sh
 
 PROJECT_ID="${PROJECT_ID:-$(gcloud config get-value project 2>/dev/null || true)}"
+PROJECT_ID="${PROJECT_ID:-grocery-planner-515506}"
 REGION="${REGION:-us-central1}"
 ZONE="${ZONE:-us-central1-a}"
 VM_NAME="${VM_NAME:-grocery-planner-vm}"
@@ -78,7 +79,13 @@ if [ -f ".env" ]; then
 fi
 
 # 6. Provision Python, Caddy, systemd services on the VM
-DEFAULT_DOMAIN="${PUBLIC_DOMAIN:-${VM_IP//./-}.sslip.io}"
+if [ -n "${DUCKDNS_DOMAIN:-}" ] && [ -n "${DUCKDNS_TOKEN:-}" ]; then
+  echo "==> Updating DuckDNS record '${DUCKDNS_DOMAIN}.duckdns.org' -> $VM_IP..."
+  curl -sf "https://www.duckdns.org/update?domains=${DUCKDNS_DOMAIN}&token=${DUCKDNS_TOKEN}&ip=${VM_IP}" >/dev/null
+  DEFAULT_DOMAIN="${DUCKDNS_DOMAIN}.duckdns.org"
+else
+  DEFAULT_DOMAIN="${PUBLIC_DOMAIN:-${VM_IP//./-}.sslip.io}"
+fi
 echo "==> Provisioning VM (domain: $DEFAULT_DOMAIN)..."
 gcloud compute ssh "$VM_NAME" --zone="$ZONE" --project="$PROJECT_ID" --command="bash -s" <<REMOTE_EOF
 set -euo pipefail
@@ -159,6 +166,10 @@ REMOTE_EOF
 
 echo ""
 echo "✅ Deployment complete!"
-echo "   Static IP : $VM_IP"
-echo "   HTTPS URL : https://$DEFAULT_DOMAIN"
-echo "   OAuth URI : https://$DEFAULT_DOMAIN/auth/google/callback"
+echo "   Static IP    : $VM_IP"
+echo "   HTTPS URL    : https://$DEFAULT_DOMAIN"
+echo ""
+echo "👉 One-time Google OAuth setup (Google has no CLI/API to edit Web OAuth redirect URIs):"
+echo "   Open: https://console.cloud.google.com/apis/credentials?project=$PROJECT_ID"
+echo "   Add Authorized JavaScript origin : https://$DEFAULT_DOMAIN"
+echo "   Add Authorized redirect URI      : https://$DEFAULT_DOMAIN/auth/google/callback"
