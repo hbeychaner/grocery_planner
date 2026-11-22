@@ -45,6 +45,7 @@ interface TrackedItem {
 export function TrendsView() {
   const [mode, setMode] = useState<"comparison" | "generic">("comparison");
   const [normalizeByIncome, setNormalizeByIncome] = useState(false);
+  const [rebaseIndex, setRebaseIndex] = useState(false);
   const [days, setDays] = useState("730");
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [selectedCategory, setSelectedCategory] = useState("overall");
@@ -59,10 +60,18 @@ export function TrendsView() {
     return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
   }
 
-  async function loadDashboard(cat = selectedCategory, m = mode, norm = normalizeByIncome, d = days) {
+  async function loadDashboard(
+    cat = selectedCategory,
+    m = mode,
+    norm = normalizeByIncome,
+    d = days,
+    rebase = rebaseIndex
+  ) {
     const [analyticsResp, seriesResp, itemsResp] = await Promise.all([
       fetch(`/api/v1/history/analytics?mode=${m}&normalize_by_income=${norm}`),
-      fetch(`/api/v1/history/analytics/series?category=${encodeURIComponent(cat)}&days=${d}&mode=${m}&normalize_by_income=${norm}`),
+      fetch(
+        `/api/v1/history/analytics/series?category=${encodeURIComponent(cat)}&days=${d}&mode=${m}&normalize_by_income=${norm}&rebase_index=${rebase}`
+      ),
       fetch("/api/v1/history/items"),
     ]);
 
@@ -83,7 +92,7 @@ export function TrendsView() {
 
   useEffect(() => {
     loadDashboard();
-  }, [selectedCategory, mode, normalizeByIncome, days]);
+  }, [selectedCategory, mode, normalizeByIncome, days, rebaseIndex]);
 
   useEffect(() => {
     const q = filterText.trim();
@@ -235,6 +244,15 @@ export function TrendsView() {
             />
             <span>Normalize by Median Income (CZ vs. Midwest US)</span>
           </label>
+          <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={rebaseIndex}
+              onChange={(e) => setRebaseIndex(e.target.checked)}
+              className="rounded border-slate-300 text-indigo-600"
+            />
+            <span>Relative Inflation Mode (Base = 100)</span>
+          </label>
 
           <div className="max-h-80 overflow-y-auto space-y-1 pr-1">
             {categories.map((row) => {
@@ -278,6 +296,7 @@ export function TrendsView() {
                   ? "Comparison mode: Rohlík ∩ Košík & ČSÚ ∩ US BLS"
                   : "Generic mode: all available items per source"}
                 {normalizeByIncome ? " • Normalized as % of monthly median income" : ""}
+                {rebaseIndex ? " • Rebased to Index 100 at start of window" : ""}
               </p>
             </div>
             <select

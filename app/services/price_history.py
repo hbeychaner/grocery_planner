@@ -915,6 +915,7 @@ class PriceHistoryService:
         days: int = 90,
         mode: str = "generic",
         normalize_by_income: bool = False,
+        rebase_index: bool = False,
     ) -> CategoryHistorySeries:
         """Compute time-series average unit prices for a category (or overall) across sweeps.
 
@@ -1056,6 +1057,18 @@ class PriceHistoryService:
                     avg_bls=_pt_avg(bls_vals, is_us=True),
                 )
             )
+
+        if rebase_index and points:
+            for field in ("avg_rohlik", "avg_kosik", "blended_avg", "avg_bio", "avg_csu", "avg_bls"):
+                base_val = next(
+                    (getattr(pt, field) for pt in points if getattr(pt, field) is not None and getattr(pt, field) > 0),
+                    None,
+                )
+                if base_val:
+                    for pt in points:
+                        cur = getattr(pt, field)
+                        if cur is not None:
+                            setattr(pt, field, round((cur / base_val) * 100.0, 2))
 
         display = "Overall (All Categories)" if cat_norm == "overall" else cat_norm.replace("_", " ").title()
         return CategoryHistorySeries(category=cat_norm, display_name=display, points=points)

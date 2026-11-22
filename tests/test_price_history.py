@@ -448,3 +448,30 @@ def test_rank_tracked_items_accent_insensitive_and_semantic() -> None:
     assert len(ranked) == 3
     assert ranked[0].query == "oat milk"
     history.close()
+
+
+def test_relative_inflation_rebase_index_100() -> None:
+    """rebase_index=True should rebase each series to 100.0 at its first available month."""
+    history = PriceHistoryService(db_path=Path(":memory:"))
+    history.add_tracked_item("whole milk", query_cs="plnotučné mléko", category="dairy")
+    t1 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    t2 = datetime(2026, 2, 1, tzinfo=timezone.utc)
+
+    with Session(history.engine) as session:
+        session.add_all(
+            [
+                PriceSnapshotRecord(item_query="whole milk", store="csu", product_name="Mléko", price=20.0, unit_price=20.0, unit_type="l", recorded_at=t1),
+                PriceSnapshotRecord(item_query="whole milk", store="csu", product_name="Mléko", price=25.0, unit_price=25.0, unit_type="l", recorded_at=t2),
+                PriceSnapshotRecord(item_query="whole milk", store="bls", product_name="Milk ($4/gal @ 20.00 CZK/USD)", price=80.0, unit_price=40.0, unit_type="l", recorded_at=t1),
+                PriceSnapshotRecord(item_query="whole milk", store="bls", product_name="Milk ($4.4/gal @ 20.00 CZK/USD)", price=88.0, unit_price=44.0, unit_type="l", recorded_at=t2),
+            ]
+        )
+        session.commit()
+
+    series = history.get_category_series("overall", days=3650, mode="comparison", rebase_index=True)
+    assert len(series.points) == 2
+    assert series.points[0].avg_csu == 100.0
+    assert series.points[1].avg_csu == 125.0
+    assert series.points[0].avg_bls == 100.0
+    assert series.points[1].avg_bls == 110.0
+    history.close()
