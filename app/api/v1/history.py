@@ -39,10 +39,14 @@ async def get_category_analytics(
         pattern="^(generic|comparison)$",
         description="Analytics aggregation mode: 'generic' (all items) or 'comparison' (matched basket across all sources)",
     ),
+    normalize_by_income: bool = Query(
+        default=False,
+        description="Normalize prices by monthly median income of Czechia vs. Midwest USA (% of monthly median income)",
+    ),
     history: PriceHistoryService = Depends(get_price_history_service),
 ) -> CategoryAnalyticsResponse:
     """Return overall and per-category average unit prices and weekly inflation metrics."""
-    return history.get_category_analytics(mode=mode)
+    return history.get_category_analytics(mode=mode, normalize_by_income=normalize_by_income)
 
 
 @router.get("/analytics/series", response_model=CategoryHistorySeries)
@@ -54,10 +58,16 @@ async def get_category_series(
         pattern="^(generic|comparison)$",
         description="Analytics aggregation mode: 'generic' (all items) or 'comparison' (matched basket across all sources)",
     ),
+    normalize_by_income: bool = Query(
+        default=False,
+        description="Normalize time series by monthly median income of Czechia vs. Midwest USA (% of monthly median income)",
+    ),
     history: PriceHistoryService = Depends(get_price_history_service),
 ) -> CategoryHistorySeries:
     """Return time-series average unit prices for a category or overall."""
-    return history.get_category_series(category=category, days=days, mode=mode)
+    return history.get_category_series(
+        category=category, days=days, mode=mode, normalize_by_income=normalize_by_income
+    )
 
 
 @router.get("/items", response_model=TrackedItemsListResponse)

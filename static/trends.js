@@ -16,6 +16,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const snapshotsTbody = document.getElementById("snapshots-tbody");
   const categoryListContainer = document.getElementById("category-list-container");
   const analyticsModeToggle = document.getElementById("analytics-mode-toggle");
+  const normalizeIncomeToggle = document.getElementById("normalize-income-toggle");
   const catChartTitle = document.getElementById("cat-chart-title");
   const catChartSubtitle = document.getElementById("cat-chart-subtitle");
   const catSummaryPills = document.getElementById("cat-summary-pills");
@@ -25,6 +26,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let allItems = [];
   let analyticsRows = [];
   let analyticsMode = "comparison";
+  let normalizeByIncome = false;
   let selectedQuery = null;
   let selectedCategory = null; // null means 'overall'
   let priceChart = null;
@@ -52,8 +54,17 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  if (normalizeIncomeToggle) {
+    normalizeIncomeToggle.addEventListener("change", async () => {
+      normalizeByIncome = Boolean(normalizeIncomeToggle.checked);
+      await loadAnalytics();
+    });
+  }
+
   async function loadAnalytics() {
-    const resp = await fetch(`/api/v1/history/analytics?mode=${encodeURIComponent(analyticsMode)}`);
+    const resp = await fetch(
+      `/api/v1/history/analytics?mode=${encodeURIComponent(analyticsMode)}&normalize_by_income=${normalizeByIncome}`
+    );
     const data = await resp.json();
     analyticsRows = [data.overall, ...(data.categories || [])];
     renderCategoryList();
@@ -63,7 +74,9 @@ document.addEventListener("DOMContentLoaded", () => {
   function renderCategoryList() {
     categoryListContainer.innerHTML = analyticsRows.map(row => {
       const isActive = (row.category === "overall" && !selectedCategory) || (row.category === selectedCategory);
-      const avg = row.blended_avg_unit_price !== null ? `${row.blended_avg_unit_price.toFixed(1)} CZK` : "—";
+      const avg = row.blended_avg_unit_price !== null
+        ? (normalizeByIncome ? `${row.blended_avg_unit_price.toFixed(3)}%` : `${row.blended_avg_unit_price.toFixed(1)} CZK`)
+        : "—";
       return `
         <button
           class="chip"
@@ -89,19 +102,26 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function loadCategorySeries(category) {
     const days = daysSelect.value || "730";
-    const resp = await fetch(`/api/v1/history/analytics/series?category=${encodeURIComponent(category)}&days=${days}&mode=${encodeURIComponent(analyticsMode)}`);
+    const resp = await fetch(
+      `/api/v1/history/analytics/series?category=${encodeURIComponent(category)}&days=${days}&mode=${encodeURIComponent(analyticsMode)}&normalize_by_income=${normalizeByIncome}`
+    );
     const series = await resp.json();
 
     const meta = analyticsRows.find(r => r.category === category) || analyticsRows[0];
     catChartTitle.textContent = meta ? meta.display_name : series.display_name;
     if (catChartSubtitle) {
-      catChartSubtitle.textContent = analyticsMode === "comparison"
+      const modeText = analyticsMode === "comparison"
         ? "Comparison mode: Rohlík ∩ Košík (online) & ČSÚ ∩ US BLS (national)"
         : "Generic mode: all available items per source in each category";
+      catChartSubtitle.textContent = normalizeByIncome
+        ? `${modeText} • Normalized as % of monthly median income (CZ vs. Midwest US)`
+        : modeText;
     }
 
     if (meta) {
-      const fmt = (v) => (v !== null && v !== undefined) ? `${v.toFixed(2)} CZK` : "—";
+      const fmt = (v) => (v !== null && v !== undefined)
+        ? (normalizeByIncome ? `${v.toFixed(4)}%` : `${v.toFixed(2)} CZK`)
+        : "—";
       const wow = (meta.wow_change_pct !== null && meta.wow_change_pct !== undefined)
         ? `${meta.wow_change_pct > 0 ? "+" : ""}${meta.wow_change_pct.toFixed(2)}%`
         : "Baseline";
@@ -184,7 +204,10 @@ document.addEventListener("DOMContentLoaded", () => {
         scales: {
           y: {
             beginAtZero: false,
-            title: { display: true, text: "Average Unit Price (CZK)" },
+            title: {
+              display: true,
+              text: normalizeByIncome ? "% of Monthly Median Income (CZ vs. Midwest US)" : "Average Unit Price (CZK)",
+            },
           },
         },
       },

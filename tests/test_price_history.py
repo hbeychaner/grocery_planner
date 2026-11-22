@@ -391,3 +391,47 @@ def test_normalize_piece_unit_price_and_frozen_separation() -> None:
     )
     filtered = matcher._filter_relevant_products("špenát", [frozen, fresh], "spinach")
     assert [p.name for p in filtered] == ["Baby špenát čerstvý"]
+
+
+def test_income_normalized_analytics_and_series() -> None:
+    """Income normalization scales CZ prices by Czech median wage and US prices by Midwest US income."""
+    history = PriceHistoryService(db_path=Path(":memory:"))
+    history.add_tracked_item("whole milk", query_cs="plnotučné mléko", category="dairy")
+    ts = datetime(2025, 10, 1, tzinfo=timezone.utc)  # 2025-Q4: CZ median = 45,523 CZK; US 2025 = $4,945/mo
+
+    with Session(history.engine) as session:
+        session.add_all(
+            [
+                PriceSnapshotRecord(
+                    item_query="whole milk",
+                    store="csu",
+                    product_name="ČSÚ mléko",
+                    price=25.0,
+                    unit_price=25.0,
+                    unit_type="l",
+                    recorded_at=ts,
+                ),
+                PriceSnapshotRecord(
+                    item_query="whole milk",
+                    store="bls",
+                    product_name="Whole milk, fresh ($4.00/gal @ 20.00 CZK/USD)",
+                    price=80.0,
+                    unit_price=21.13,
+                    unit_type="l",
+                    recorded_at=ts,
+                ),
+            ]
+        )
+        session.commit()
+
+    analytics = history.get_category_analytics(mode="comparison", normalize_by_income=True)
+    # 25.0 / 45523 * 100 = 0.0549%
+    assert analytics.overall.avg_csu_unit_price == round((25.0 / 45523.0) * 100.0, 4)
+    # 21.13 / (4945 * 20.0) * 100 = 0.0214%
+    assert analytics.overall.avg_bls_unit_price == round((21.13 / (4945.0 * 20.0)) * 100.0, 4)
+
+    series = history.get_category_series("overall", days=3650, mode="comparison", normalize_by_income=True)
+    assert len(series.points) == 1
+    assert series.points[0].avg_csu == analytics.overall.avg_csu_unit_price
+    assert series.points[0].avg_bls == analytics.overall.avg_bls_unit_price
+    history.close()

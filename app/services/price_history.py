@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -13,6 +14,78 @@ from app.models.comparison import ComparisonResponse
 from app.models.product import StoreProduct
 
 logger = logging.getLogger(__name__)
+
+# Official ČSÚ quarterly gross median monthly wage in Czechia (CZK/month).
+# 2026 carries forward Q4 2025 (45,523 CZK) while ČSÚ transitions to JMHZ reporting.
+CZ_MEDIAN_MONTHLY_INCOME_CZK: Dict[str, float] = {
+    "2024-Q1": 36651.0,
+    "2024-Q2": 38529.0,
+    "2024-Q3": 40482.0,
+    "2024-Q4": 41739.0,
+    "2025-Q1": 38385.0,
+    "2025-Q2": 41115.0,
+    "2025-Q3": 42901.0,
+    "2025-Q4": 45523.0,
+}
+CZ_LATEST_MEDIAN_INCOME_CZK = 45523.0
+
+# Midwest USA individual gross median monthly earnings (USD/month),
+# derived from BLS national median usual weekly earnings * 52/12 * 0.94 Midwest regional factor.
+MIDWEST_US_MEDIAN_MONTHLY_INCOME_USD: Dict[int, float] = {
+    2024: 4680.0,
+    2025: 4945.0,
+    2026: 5019.0,
+}
+
+
+def _czech_median_income_for_month(ym: str) -> float:
+    """Return Czechia gross median monthly income (CZK) for YYYY-MM."""
+    try:
+        year = int(ym[:4])
+        month = int(ym[5:7])
+        quarter = (month - 1) // 3 + 1
+        key = f"{year}-Q{quarter}"
+        if key in CZ_MEDIAN_MONTHLY_INCOME_CZK:
+            return CZ_MEDIAN_MONTHLY_INCOME_CZK[key]
+        if year < 2024:
+            return CZ_MEDIAN_MONTHLY_INCOME_CZK["2024-Q1"]
+    except Exception:
+        pass
+    return CZ_LATEST_MEDIAN_INCOME_CZK
+
+
+def _midwest_us_median_income_czk_for_month(ym: str, fx_by_month: Dict[str, float]) -> float:
+    """Return Midwest USA gross median monthly income converted to CZK at month FX."""
+    try:
+        year = int(ym[:4])
+    except Exception:
+        year = 2026
+    usd_monthly = MIDWEST_US_MEDIAN_MONTHLY_INCOME_USD.get(
+        year,
+        MIDWEST_US_MEDIAN_MONTHLY_INCOME_USD[2024] if year < 2024 else MIDWEST_US_MEDIAN_MONTHLY_INCOME_USD[2026],
+    )
+    fallback_fx = fx_by_month[max(fx_by_month.keys())] if fx_by_month else 23.0
+    fx = fx_by_month.get(ym, fallback_fx)
+    return usd_monthly * fx
+
+
+def _extract_bls_fx_by_month(session: Session) -> Dict[str, float]:
+    """Extract historical monthly USD->CZK rates stored in BLS snapshot product names."""
+    rows = session.execute(
+        select(PriceSnapshotRecord.recorded_at, PriceSnapshotRecord.product_name).where(
+            PriceSnapshotRecord.store == "bls"
+        )
+    ).all()
+    fx_map: Dict[str, float] = {}
+    for rec_at, prod_name in rows:
+        if not prod_name:
+            continue
+        m = re.search(r"@\s*(\d+(?:\.\d+)?)\s*CZK/USD", prod_name)
+        if not m:
+            continue
+        ym = rec_at.strftime("%Y-%m") if isinstance(rec_at, datetime) else str(rec_at)[:7]
+        fx_map[ym] = float(m.group(1))
+    return fx_map
 
 
 class PriceHistoryBase(DeclarativeBase):
@@ -595,13 +668,16 @@ class PriceHistoryService:
                 else (str(last_ts) if last_ts is not None else None),
             )
 
-    def get_category_analytics(self, mode: str = "generic") -> CategoryAnalyticsResponse:
+    def get_category_analytics(
+        self, mode: str = "generic", normalize_by_income: bool = False
+    ) -> CategoryAnalyticsResponse:
         """Compute overall and per-category average unit prices and weekly inflation %.
 
         Args:
             mode: ``"generic"`` averages each source over all available items in the
-                category; ``"comparison"`` restricts all sources to the common basket
-                of items that have data in Rohlík, Košík, ČSÚ, and US BLS.
+                category; ``"comparison"`` restricts all sources to the matched baskets.
+            normalize_by_income: When True, express values as percentage of each
+                country's monthly median income (Czechia vs. Midwest USA).
         """
         mode_norm = "comparison" if mode == "comparison" else "generic"
         CATEGORY_LABELS = {
@@ -656,6 +732,12 @@ class PriceHistoryService:
                 .where(PriceSnapshotRecord.unit_price.is_not(None))
                 .order_by(PriceSnapshotRecord.recorded_at.desc(), PriceSnapshotRecord.id.desc())
             ).all()
+            fx_by_month = _extract_bls_fx_by_month(session) if normalize_by_income else {}
+
+        latest_cz_ym = "2026-11"
+        latest_bls_ym = max(fx_by_month.keys()) if fx_by_month else "2026-10"
+        cz_income = _czech_median_income_for_month(latest_cz_ym) if normalize_by_income else 1.0
+        us_income_czk = _midwest_us_median_income_czk_for_month(latest_bls_ym, fx_by_month) if normalize_by_income else 1.0
 
         # Group snapshots by (item_query, store, is_bio, is_frozen) ordered newest -> oldest
         grouped: Dict[tuple[str, str, bool, bool], List[float]] = {}
@@ -732,16 +814,25 @@ class PriceHistoryService:
             else:
                 item_count = len(items_with_data) if items_with_data else len(queries_in_cat)
 
+            def _fmt_avg(vals: List[float], is_us: bool = False) -> Optional[float]:
+                if not vals:
+                    return None
+                raw_avg = sum(vals) / len(vals)
+                if normalize_by_income:
+                    denom = us_income_czk if is_us else cz_income
+                    return round((raw_avg / denom) * 100.0, 4) if denom > 0 else None
+                return round(raw_avg, 2)
+
             return CategoryAnalyticsRow(
                 category=cat_key,
                 display_name=CATEGORY_LABELS.get(cat_key, cat_key.replace("_", " ").title()),
                 item_count=item_count,
-                avg_rohlik_unit_price=round(sum(r_latest) / len(r_latest), 2) if r_latest else None,
-                avg_kosik_unit_price=round(sum(k_latest) / len(k_latest), 2) if k_latest else None,
-                blended_avg_unit_price=round(sum(blended_pool) / len(blended_pool), 2) if blended_pool else None,
-                avg_bio_unit_price=round(sum(bio_latest) / len(bio_latest), 2) if bio_latest else None,
-                avg_csu_unit_price=round(sum(csu_latest) / len(csu_latest), 2) if csu_latest else None,
-                avg_bls_unit_price=round(sum(bls_latest) / len(bls_latest), 2) if bls_latest else None,
+                avg_rohlik_unit_price=_fmt_avg(r_latest),
+                avg_kosik_unit_price=_fmt_avg(k_latest),
+                blended_avg_unit_price=_fmt_avg(blended_pool),
+                avg_bio_unit_price=_fmt_avg(bio_latest),
+                avg_csu_unit_price=_fmt_avg(csu_latest),
+                avg_bls_unit_price=_fmt_avg(bls_latest, is_us=True),
                 wow_change_pct=wow_pct,
             )
 
@@ -759,7 +850,11 @@ class PriceHistoryService:
         return CategoryAnalyticsResponse(overall=overall_row, categories=category_rows)
 
     def get_category_series(
-        self, category: str = "overall", days: int = 90, mode: str = "generic"
+        self,
+        category: str = "overall",
+        days: int = 90,
+        mode: str = "generic",
+        normalize_by_income: bool = False,
     ) -> CategoryHistorySeries:
         """Compute time-series average unit prices for a category (or overall) across sweeps.
 
@@ -826,6 +921,7 @@ class PriceHistoryService:
                 )
                 .order_by(PriceSnapshotRecord.recorded_at.asc(), PriceSnapshotRecord.id.asc())
             ).all()
+            fx_by_month = _extract_bls_fx_by_month(session) if normalize_by_income else {}
 
         # Bucket snapshots by month (YYYY-MM) so all sources (Rohlík, Košík, ČSÚ, BLS) align cleanly
         buckets: Dict[str, Dict[str, List[float]]] = {}
@@ -877,15 +973,27 @@ class PriceHistoryService:
                 csu_vals = b["csu"]
                 bls_vals = b["bls"]
             blended_vals = r_vals + k_vals
+            cz_inc = _czech_median_income_for_month(ts_key) if normalize_by_income else 1.0
+            us_inc_czk = _midwest_us_median_income_czk_for_month(ts_key, fx_by_month) if normalize_by_income else 1.0
+
+            def _pt_avg(vals: List[float], is_us: bool = False) -> Optional[float]:
+                if not vals:
+                    return None
+                raw = sum(vals) / len(vals)
+                if normalize_by_income:
+                    denom = us_inc_czk if is_us else cz_inc
+                    return round((raw / denom) * 100.0, 4) if denom > 0 else None
+                return round(raw, 2)
+
             points.append(
                 CategorySeriesPoint(
                     recorded_at=ts_key,
-                    avg_rohlik=round(sum(r_vals) / len(r_vals), 2) if r_vals else None,
-                    avg_kosik=round(sum(k_vals) / len(k_vals), 2) if k_vals else None,
-                    blended_avg=round(sum(blended_vals) / len(blended_vals), 2) if blended_vals else None,
-                    avg_bio=round(sum(bio_vals) / len(bio_vals), 2) if bio_vals else None,
-                    avg_csu=round(sum(csu_vals) / len(csu_vals), 2) if csu_vals else None,
-                    avg_bls=round(sum(bls_vals) / len(bls_vals), 2) if bls_vals else None,
+                    avg_rohlik=_pt_avg(r_vals),
+                    avg_kosik=_pt_avg(k_vals),
+                    blended_avg=_pt_avg(blended_vals),
+                    avg_bio=_pt_avg(bio_vals),
+                    avg_csu=_pt_avg(csu_vals),
+                    avg_bls=_pt_avg(bls_vals, is_us=True),
                 )
             )
 
