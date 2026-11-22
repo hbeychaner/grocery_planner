@@ -406,14 +406,34 @@ def mount_a2a_agent(
         rest_routes=create_rest_routes(request_handler, path_prefix="/a2a/rest", enable_v0_3_compat=True),
     )
 
-    from fastapi.responses import StreamingResponse
+    from fastapi import Request
+    from fastapi.responses import JSONResponse, StreamingResponse
     from pydantic import BaseModel
+    from app.api.deps import get_auth_service
 
     class _ChatStreamRequest(BaseModel):
         message: str
 
     @fastapi_app.post("/a2a/stream", include_in_schema=False)
-    async def stream_agent_chat(payload: _ChatStreamRequest) -> StreamingResponse:
+    async def stream_agent_chat(
+        request: Request,
+        payload: _ChatStreamRequest,
+    ) -> Any:
+        auth_svc = get_auth_service()
+        user = auth_svc.get_user_by_session(request.cookies.get("gp_session"))
+        user_key = user.id if user is not None else (request.client.host if request.client else "anon")
+        allowed, _remaining = auth_svc.consume_daily_chat_quota(user_key)
+        if not allowed:
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "detail": (
+                        f"Daily chat limit reached ({settings.max_chats_per_user_per_day} "
+                        "chats per user per day). Please try again tomorrow."
+                    )
+                },
+            )
+
         async def _event_gen() -> AsyncGenerator[str, None]:
             try:
                 async for ev in agent.stream_events(payload.message):

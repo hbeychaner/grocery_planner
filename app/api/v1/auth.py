@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from app.api.deps import get_auth_service
 from app.core.config import settings
-from app.services.auth import AuthService, AuthUser
+from app.services.auth import AuthService, AuthUser, DailySignupLimitError
 
 SESSION_COOKIE_NAME = "gp_session"
 OAUTH_STATE_COOKIE_NAME = "gp_oauth_state"
@@ -89,6 +89,8 @@ async def register(
             password=payload.password,
             display_name=payload.display_name,
         )
+    except DailySignupLimitError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -213,7 +215,10 @@ async def google_callback(
         if not google_sub or not email:
             raise HTTPException(status_code=400, detail="Google profile missing sub or email")
 
-    user = auth.upsert_google_user(google_sub=google_sub, email=email, display_name=name)
+    try:
+        user = auth.upsert_google_user(google_sub=google_sub, email=email, display_name=name)
+    except DailySignupLimitError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
     session_token = auth.create_session(user.id)
     resp = RedirectResponse(url="/", status_code=302)
     resp.delete_cookie(OAUTH_STATE_COOKIE_NAME, path="/")

@@ -11,7 +11,7 @@ from typing import Optional
 import uuid
 
 from pydantic import BaseModel
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, create_engine, delete, select, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, create_engine, delete, func, select, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 from sqlalchemy.pool import StaticPool
 
@@ -50,6 +50,22 @@ class SessionRecord(AuthBase):
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
+
+
+class ChatUsageRecord(AuthBase):
+    """Per-user chat request log for enforcing daily chat quotas."""
+
+    __tablename__ = "chat_usage"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    used_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), index=True
+    )
+
+
+class DailySignupLimitError(ValueError):
+    """Raised when the daily cap on new user registrations has been reached."""
 
 
 class AuthUser(BaseModel):
@@ -119,6 +135,23 @@ class AuthService:
             auth_provider="google" if rec.google_sub else "local",
         )
 
+    @staticmethod
+    def _utc_day_start_naive() -> datetime:
+        return datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
+
+    def _check_daily_signup_limit(self, session: Session) -> None:
+        limit = settings.max_new_users_per_day
+        if limit <= 0:
+            return
+        day_start = self._utc_day_start_naive()
+        count = session.scalar(
+            select(func.count()).select_from(UserRecord).where(UserRecord.created_at >= day_start)
+        ) or 0
+        if count >= limit:
+            raise DailySignupLimitError(
+                f"Daily new user registration limit reached ({limit} new users/day). Please try again tomorrow."
+            )
+
     def register_user(self, email: str, password: str, display_name: Optional[str] = None) -> AuthUser:
         """Create a new local user account."""
         norm_email = email.strip().lower()
@@ -127,6 +160,7 @@ class AuthService:
             existing = session.scalar(select(UserRecord).where(UserRecord.email == norm_email))
             if existing is not None:
                 raise ValueError("An account with this email already exists")
+            self._check_daily_signup_limit(session)
             rec = UserRecord(
                 id=str(uuid.uuid4()),
                 email=norm_email,
@@ -162,6 +196,7 @@ class AuthService:
                 )
             )
             if rec is None:
+                self._check_daily_signup_limit(session)
                 rec = UserRecord(
                     id=str(uuid.uuid4()),
                     email=norm_email,
@@ -194,6 +229,31 @@ class AuthService:
             )
             session.commit()
         return raw_token
+
+    def consume_daily_chat_quota(
+        self,
+        user_id: str,
+        max_per_day: Optional[int] = None,
+    ) -> tuple[bool, int]:
+        """Consume 1 daily chat slot for user_id. Returns (allowed, remaining)."""
+        limit = max_per_day if max_per_day is not None else settings.max_chats_per_user_per_day
+        if limit <= 0:
+            return True, 0
+        day_start = self._utc_day_start_naive()
+        with Session(self.engine) as session:
+            used_today = session.scalar(
+                select(func.count())
+                .select_from(ChatUsageRecord)
+                .where(
+                    ChatUsageRecord.user_id == user_id,
+                    ChatUsageRecord.used_at >= day_start,
+                )
+            ) or 0
+            if used_today >= limit:
+                return False, 0
+            session.add(ChatUsageRecord(user_id=user_id))
+            session.commit()
+            return True, max(0, limit - used_today - 1)
 
     def get_user_by_session(self, raw_token: Optional[str]) -> Optional[AuthUser]:
         """Resolve an active, unexpired session token to its AuthUser."""

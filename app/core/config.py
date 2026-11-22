@@ -56,6 +56,8 @@ class AppSettings(BaseSettings):
     require_auth: bool = Field(default=True, alias="REQUIRE_AUTH")
     api_auth_token: Optional[str] = Field(default=None, alias="API_AUTH_TOKEN")
     rate_limit_per_minute: int = Field(default=60, alias="RATE_LIMIT_PER_MINUTE")
+    max_new_users_per_day: int = Field(default=5, alias="MAX_NEW_USERS_PER_DAY")
+    max_chats_per_user_per_day: int = Field(default=3, alias="MAX_CHATS_PER_USER_PER_DAY")
 
     # Language & Translation Cache Configuration
     default_catalog_language: str = Field(default="cs", alias="DEFAULT_CATALOG_LANGUAGE")
