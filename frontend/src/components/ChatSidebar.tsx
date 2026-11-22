@@ -1,5 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Bot, CheckCircle2, ChevronDown, ChevronRight, Loader2, Send, Wrench, XCircle } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { streamAgentChat, type AgentStreamEvent } from "../api";
 import { useLang } from "../i18n";
 
@@ -278,7 +280,11 @@ export function ChatSidebar() {
               </div>
             )}
 
-            {m.text && <div className="whitespace-pre-wrap">{m.text}</div>}
+            {m.text && (
+              <div className="space-y-2 [&>h1]:text-sm [&>h1]:font-bold [&>h2]:text-xs [&>h2]:font-bold [&>h3]:text-xs [&>h3]:font-semibold [&>h3]:text-slate-900 [&>p]:leading-relaxed [&>ul]:list-disc [&>ul]:pl-4 [&>ul]:space-y-1 [&>ol]:list-decimal [&>ol]:pl-4 [&>ol]:space-y-1 [&>hr]:border-slate-200 [&>hr]:my-2 [&_strong]:font-semibold [&_a]:text-indigo-600 [&_a]:underline [&_code]:bg-slate-100 [&_code]:px-1 [&_code]:rounded [&_table]:w-full [&_table]:text-[11px] [&_th]:text-left [&_th]:border-b [&_th]:border-slate-200 [&_th]:py-1 [&_td]:border-b [&_td]:border-slate-100 [&_td]:py-1">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.text}</ReactMarkdown>
+              </div>
+            )}
           </div>
         ))}
       </div>

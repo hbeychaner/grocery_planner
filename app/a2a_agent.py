@@ -177,7 +177,7 @@ class GroceryMCPAgent:
                         system_instruction=SYSTEM_INSTRUCTION,
                         tools=tool_defs or None,
                         temperature=0.2,
-                        max_tokens=1024,
+                        max_tokens=4096,
                     )
                     if llm_resp is None:
                         return "I couldn't generate a response.", stats
@@ -285,7 +285,7 @@ class GroceryMCPAgent:
                             system_instruction=SYSTEM_INSTRUCTION,
                             tools=tool_defs or None,
                             temperature=0.2,
-                            max_tokens=1024,
+                            max_tokens=4096,
                         )
                         if llm_resp is None:
                             yield {"type": "answer", "text": "I couldn't generate a response."}
