@@ -86,6 +86,7 @@ export async function sendA2AMessage(text: string): Promise<string> {
 }
 
 export type AgentStreamEvent =
+  | { type: "thread"; thread_id: string }
   | { type: "thinking"; turn: number }
   | { type: "thought"; turn: number; text: string }
   | { type: "tool_call"; turn: number; name: string; args: Record<string, unknown> }
@@ -93,14 +94,52 @@ export type AgentStreamEvent =
   | { type: "answer"; text: string }
   | { type: "error"; message: string };
 
+export interface ChatThreadSummary {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PersistedChatMessage {
+  id: string;
+  role: "user" | "bot";
+  text: string;
+  steps?: Array<{
+    kind: "thought" | "tool";
+    label: string;
+    detail?: string;
+    status: "running" | "done" | "error";
+  }>;
+}
+
+export async function fetchChatThreads(): Promise<ChatThreadSummary[]> {
+  const resp = await fetch("/api/v1/chat/threads");
+  if (!resp.ok) return [];
+  const data = await resp.json();
+  return data.threads || [];
+}
+
+export async function fetchChatMessages(threadId: string): Promise<PersistedChatMessage[]> {
+  const resp = await fetch(`/api/v1/chat/threads/${encodeURIComponent(threadId)}`);
+  if (!resp.ok) return [];
+  const data = await resp.json();
+  return data.messages || [];
+}
+
+export async function deleteChatThread(threadId: string): Promise<void> {
+  await fetch(`/api/v1/chat/threads/${encodeURIComponent(threadId)}`, { method: "DELETE" });
+}
+
 export async function streamAgentChat(
   message: string,
+  threadId: string | null,
   onEvent: (event: AgentStreamEvent) => void
 ): Promise<void> {
   const resp = await fetch("/api/v1/chat/stream", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, thread_id: threadId }),
   });
   if (!resp.ok || !resp.body) {
     const errBody = await resp.json().catch(() => ({}));

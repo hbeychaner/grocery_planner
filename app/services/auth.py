@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
+import json
 from pathlib import Path
 import secrets
 import time
@@ -16,7 +17,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from joserfc import jwt as jose_jwt
 from joserfc.jwk import RSAKey
 from pydantic import BaseModel
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, create_engine, delete, func, select, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, create_engine, delete, func, select, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 from sqlalchemy.pool import StaticPool
 
@@ -93,6 +94,39 @@ class ChatUsageRecord(AuthBase):
     user_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     used_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), index=True
+    )
+
+
+class ChatThreadRecord(AuthBase):
+    """Per-user persistent chat thread."""
+
+    __tablename__ = "chat_threads"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String, nullable=False, default="New Chat")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), index=True
+    )
+
+
+class ChatMessageRecord(AuthBase):
+    """Individual user or assistant message in a persistent chat thread."""
+
+    __tablename__ = "chat_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    thread_id: Mapped[str] = mapped_column(
+        String, ForeignKey("chat_threads.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    role: Mapped[str] = mapped_column(String, nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    steps_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
 
 
@@ -329,6 +363,126 @@ class AuthService:
             return claims
         except Exception:
             return None
+
+    def list_chat_threads(self, user_id: str, limit: int = 30) -> List[Dict[str, Any]]:
+        """Return user's chat threads ordered by most recently updated."""
+        with Session(self.engine) as session:
+            threads = session.scalars(
+                select(ChatThreadRecord)
+                .where(ChatThreadRecord.user_id == user_id)
+                .order_by(ChatThreadRecord.updated_at.desc())
+                .limit(limit)
+            ).all()
+            return [
+                {
+                    "id": th.id,
+                    "title": th.title,
+                    "created_at": th.created_at.isoformat(),
+                    "updated_at": th.updated_at.isoformat(),
+                }
+                for th in threads
+            ]
+
+    def create_chat_thread(self, user_id: str, title: str = "New Chat") -> Dict[str, Any]:
+        """Create and persist a new chat thread for a user."""
+        now = datetime.now(timezone.utc)
+        thread_id = str(uuid.uuid4())
+        clean_title = title[:80]
+        rec = ChatThreadRecord(
+            id=thread_id,
+            user_id=user_id,
+            title=clean_title,
+            created_at=now,
+            updated_at=now,
+        )
+        with Session(self.engine) as session:
+            session.add(rec)
+            session.commit()
+        return {
+            "id": thread_id,
+            "title": clean_title,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+
+    def get_chat_messages(self, user_id: str, thread_id: str) -> Optional[List[Dict[str, Any]]]:
+        """Return messages for a user-owned thread, or None if not found."""
+        with Session(self.engine) as session:
+            thread = session.scalar(
+                select(ChatThreadRecord).where(
+                    ChatThreadRecord.id == thread_id,
+                    ChatThreadRecord.user_id == user_id,
+                )
+            )
+            if thread is None:
+                return None
+            msgs = session.scalars(
+                select(ChatMessageRecord)
+                .where(ChatMessageRecord.thread_id == thread_id)
+                .order_by(ChatMessageRecord.id.asc())
+            ).all()
+            out: List[Dict[str, Any]] = []
+            for m in msgs:
+                try:
+                    steps = json.loads(m.steps_json) if m.steps_json else []
+                except Exception:
+                    steps = []
+                out.append(
+                    {
+                        "id": str(m.id),
+                        "role": m.role,
+                        "text": m.text,
+                        "steps": steps,
+                        "created_at": m.created_at.isoformat(),
+                    }
+                )
+            return out
+
+    def append_chat_message(
+        self,
+        user_id: str,
+        thread_id: str,
+        role: str,
+        text: str,
+        steps: Optional[List[Dict[str, Any]]] = None,
+    ) -> None:
+        """Append a message to a user-owned chat thread and update thread title/timestamp."""
+        now = datetime.now(timezone.utc)
+        with Session(self.engine) as session:
+            thread = session.scalar(
+                select(ChatThreadRecord).where(
+                    ChatThreadRecord.id == thread_id,
+                    ChatThreadRecord.user_id == user_id,
+                )
+            )
+            if thread is None:
+                return
+            if role == "user" and thread.title == "New Chat" and text.strip():
+                clean = " ".join(text.strip().split())
+                thread.title = clean[:57] + "..." if len(clean) > 60 else clean
+            thread.updated_at = now
+            session.add(
+                ChatMessageRecord(
+                    thread_id=thread_id,
+                    role=role,
+                    text=text,
+                    steps_json=json.dumps(steps or [], ensure_ascii=False),
+                    created_at=now,
+                )
+            )
+            session.commit()
+
+    def delete_chat_thread(self, user_id: str, thread_id: str) -> bool:
+        """Delete a user-owned chat thread and its messages."""
+        with Session(self.engine) as session:
+            res = session.execute(
+                delete(ChatThreadRecord).where(
+                    ChatThreadRecord.id == thread_id,
+                    ChatThreadRecord.user_id == user_id,
+                )
+            )
+            session.commit()
+            return (res.rowcount or 0) > 0
 
     def get_user_by_session(self, raw_token: Optional[str]) -> Optional[AuthUser]:
         """Resolve an active, unexpired session token to its AuthUser."""

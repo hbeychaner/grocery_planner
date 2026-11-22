@@ -80,3 +80,36 @@ async def test_mcp_jwt_verifier_enforces_obo_token(tmp_path: Path) -> None:
                 await bad_client.list_tools()
 
     auth.close()
+
+
+def test_per_user_chat_threads_persistence(tmp_path: Path) -> None:
+    auth = AuthService(db_path=tmp_path / "auth.db")
+    alice = auth.register_user("alice@example.com", "pw123456", "Alice")
+    bob = auth.register_user("bob@example.com", "pw123456", "Bob")
+
+    th = auth.create_chat_thread(alice.id)
+    auth.append_chat_message(alice.id, th["id"], "user", "Compare butter prices")
+    auth.append_chat_message(
+        alice.id,
+        th["id"],
+        "bot",
+        "Rohlík is cheaper.",
+        steps=[{"kind": "tool", "label": "compare_product", "status": "done"}],
+    )
+
+    alice_threads = auth.list_chat_threads(alice.id)
+    assert len(alice_threads) == 1
+    assert alice_threads[0]["title"] == "Compare butter prices"
+
+    msgs = auth.get_chat_messages(alice.id, th["id"])
+    assert msgs is not None and len(msgs) == 2
+    assert msgs[1]["steps"][0]["label"] == "compare_product"
+
+    # Bob cannot read or delete Alice's thread
+    assert auth.list_chat_threads(bob.id) == []
+    assert auth.get_chat_messages(bob.id, th["id"]) is None
+    assert auth.delete_chat_thread(bob.id, th["id"]) is False
+
+    assert auth.delete_chat_thread(alice.id, th["id"]) is True
+    assert auth.list_chat_threads(alice.id) == []
+    auth.close()

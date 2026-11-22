@@ -1,8 +1,27 @@
-import { useState, type FormEvent } from "react";
-import { Bot, CheckCircle2, ChevronDown, ChevronRight, Loader2, Send, Wrench, XCircle } from "lucide-react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
+import {
+  Bot,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  History,
+  Loader2,
+  Plus,
+  Send,
+  Trash2,
+  Wrench,
+  XCircle,
+} from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { streamAgentChat, type AgentStreamEvent } from "../api";
+import {
+  deleteChatThread,
+  fetchChatMessages,
+  fetchChatThreads,
+  streamAgentChat,
+  type AgentStreamEvent,
+  type ChatThreadSummary,
+} from "../api";
 import { useLang } from "../i18n";
 
 interface AgentStep {
@@ -44,18 +63,88 @@ function formatToolName(rawName: string): string {
 
 export function ChatSidebar() {
   const { lang, t } = useLang();
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
+
+  const makeWelcome = useCallback(
+    (): ChatMessage => ({
       id: "welcome",
       role: "bot",
       text: t(
         "Hi! Ask me to compare prices between Rohlík and Košík, find active discounts, or check grocery price trends.",
         "Ahoj! Zeptejte se mě na srovnání cen mezi Rohlíkem a Košíkem, aktuální slevy nebo vývoj cen potravin."
       ),
-    },
-  ]);
+    }),
+    [t]
+  );
+
+  const [threads, setThreads] = useState<ChatThreadSummary[]>([]);
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const [messages, setMessages] = useState<ChatMessage[]>(() => [makeWelcome()]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+
+  const loadThread = useCallback(
+    async (threadId: string) => {
+      const persisted = await fetchChatMessages(threadId);
+      setActiveThreadId(threadId);
+      setShowHistory(false);
+      if (persisted.length === 0) {
+        setMessages([makeWelcome()]);
+        return;
+      }
+      setMessages(
+        persisted.map((m) => ({
+          id: m.id,
+          role: m.role,
+          text: m.text,
+          steps: (m.steps || []).map((s, idx) => ({
+            id: `${m.id}-s-${idx}`,
+            kind: s.kind,
+            label: s.kind === "tool" ? formatToolName(s.label) : s.label,
+            detail: s.detail,
+            status: s.status,
+          })),
+          stepsOpen: false,
+        }))
+      );
+    },
+    [makeWelcome]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchChatThreads().then(async (list) => {
+      if (cancelled) return;
+      setThreads(list);
+      if (list.length > 0) {
+        await loadThread(list[0].id);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadThread]);
+
+  function startNewChat() {
+    if (sending) return;
+    setActiveThreadId(null);
+    setShowHistory(false);
+    setMessages([makeWelcome()]);
+  }
+
+  async function handleDeleteThread(threadId: string) {
+    await deleteChatThread(threadId);
+    const remaining = threads.filter((th) => th.id !== threadId);
+    setThreads(remaining);
+    if (activeThreadId === threadId) {
+      if (remaining.length > 0) {
+        await loadThread(remaining[0].id);
+      } else {
+        setActiveThreadId(null);
+        setMessages([makeWelcome()]);
+      }
+    }
+  }
 
   function toggleSteps(msgId: string) {
     setMessages((prev) =>
@@ -69,8 +158,9 @@ export function ChatSidebar() {
 
     const userMsg: ChatMessage = { id: `${Date.now()}-u`, role: "user", text: trimmed };
     const botId = `${Date.now()}-b`;
+    setShowHistory(false);
     setMessages((prev) => [
-      ...prev,
+      ...prev.filter((m) => m.id !== "welcome"),
       userMsg,
       {
         id: botId,
@@ -85,7 +175,11 @@ export function ChatSidebar() {
     setSending(true);
 
     try {
-      await streamAgentChat(trimmed, (ev: AgentStreamEvent) => {
+      await streamAgentChat(trimmed, activeThreadId, (ev: AgentStreamEvent) => {
+        if (ev.type === "thread") {
+          setActiveThreadId(ev.thread_id);
+          return;
+        }
         setMessages((prev) =>
           prev.map((m) => {
             if (m.id !== botId) return m;
@@ -151,6 +245,7 @@ export function ChatSidebar() {
           })
         );
       });
+      fetchChatThreads().then(setThreads);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Request failed";
       setMessages((prev) =>
@@ -173,22 +268,79 @@ export function ChatSidebar() {
   return (
     <aside className="w-full lg:w-96 shrink-0 lg:sticky lg:top-4 lg:h-[min(660px,calc(100vh-2rem))] rounded-2xl border border-slate-200 bg-white shadow-xs flex flex-col overflow-hidden">
       <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <Bot className="w-4 h-4 text-indigo-600" />
-          <div>
-            <h2 className="text-sm font-semibold text-slate-900">
+        <div className="flex items-center gap-2 min-w-0">
+          <Bot className="w-4 h-4 text-indigo-600 shrink-0" />
+          <div className="min-w-0">
+            <h2 className="text-sm font-semibold text-slate-900 truncate">
               {t("Grocery Assistant", "Asistent nákupů")}
             </h2>
-            <p className="text-[11px] text-slate-500">
+            <p className="text-[11px] text-slate-500 truncate">
               {t("Prices, discounts & trends", "Ceny, slevy a vývoj cen")}
             </p>
           </div>
         </div>
-        <span className="inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-          {t("Ready", "Připraven")}
-        </span>
+        <div className="flex items-center gap-1 shrink-0">
+          <button
+            type="button"
+            onClick={() => setShowHistory((v) => !v)}
+            title={t("Past chats", "Historie chatů")}
+            className={`p-1.5 rounded-lg border text-slate-600 hover:bg-slate-50 cursor-pointer ${
+              showHistory ? "border-indigo-300 bg-indigo-50 text-indigo-700" : "border-slate-200"
+            }`}
+          >
+            <History className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={startNewChat}
+            disabled={sending}
+            title={t("New chat", "Nový chat")}
+            className="p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50 cursor-pointer"
+          >
+            <Plus className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
+
+      {showHistory && (
+        <div className="border-b border-slate-200 bg-slate-50 max-h-56 overflow-y-auto p-2 space-y-1">
+          <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+            {t("Recent Chats", "Nedávné konverzace")}
+          </div>
+          {threads.length === 0 ? (
+            <div className="px-2 py-3 text-xs text-slate-400 text-center">
+              {t("No saved chats yet.", "Zatím žádné uložené chaty.")}
+            </div>
+          ) : (
+            threads.map((th) => (
+              <div
+                key={th.id}
+                className={`flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg text-xs ${
+                  th.id === activeThreadId
+                    ? "bg-indigo-50 text-indigo-900 border border-indigo-200"
+                    : "hover:bg-white text-slate-700"
+                }`}
+              >
+                <button
+                  type="button"
+                  onClick={() => loadThread(th.id)}
+                  className="flex-1 text-left truncate font-medium cursor-pointer"
+                >
+                  {th.title}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDeleteThread(th.id)}
+                  title={t("Delete chat", "Smazat chat")}
+                  className="p-1 text-slate-400 hover:text-red-600 cursor-pointer shrink-0"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      )}
 
       <div className="px-3 py-2 border-b border-slate-100 flex flex-wrap gap-1.5">
         {suggestions.map((s) => (

@@ -43,6 +43,7 @@ class ChatStreamRequest(BaseModel):
     """Request payload for streaming grocery assistant chat."""
 
     message: str
+    thread_id: Optional[str] = None
 from fastmcp.client.transports import StreamableHttpTransport
 
 from app.core.config import settings
@@ -253,10 +254,13 @@ class GroceryMCPAgent:
         user_message: str,
         obo_token: Optional[str] = None,
         anon_user_id: Optional[str] = None,
+        history: Optional[List[Dict[str, str]]] = None,
+        session_id: Optional[str] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Stream structured thinking, tool call, tool result, and final answer events."""
         with self.monitoring.trace_context(
             user_id=anon_user_id,
+            session_id=session_id,
             tags=["chat-stream", "obo"] if obo_token else ["chat-stream"],
         ):
             with self.monitoring.trace_observation(
@@ -276,7 +280,12 @@ class GroceryMCPAgent:
                         }
                         for t in mcp_tools
                     ]
-                    messages: List[Dict[str, Any]] = [{"role": "user", "content": user_message}]
+                    messages: List[Dict[str, Any]] = []
+                    for h in (history or [])[-8:]:
+                        role = "assistant" if h.get("role") == "bot" else "user"
+                        if h.get("text"):
+                            messages.append({"role": role, "content": h["text"]})
+                    messages.append({"role": "user", "content": user_message})
 
                     for turn in range(6):
                         yield {"type": "thinking", "turn": turn + 1}
@@ -456,6 +465,40 @@ def mount_a2a_agent(
     from app.api.deps import get_auth_service
     from app.services.auth import anonymize_user_id
 
+    @fastapi_app.get("/api/v1/chat/threads", include_in_schema=False)
+    async def list_chat_threads(request: Request) -> JSONResponse:
+        auth_svc = get_auth_service()
+        user = auth_svc.get_user_by_session(request.cookies.get("gp_session"))
+        user_key = user.id if user is not None else (request.client.host if request.client else "anon")
+        return JSONResponse({"threads": auth_svc.list_chat_threads(user_key)})
+
+    @fastapi_app.post("/api/v1/chat/threads", include_in_schema=False)
+    async def create_chat_thread(request: Request) -> JSONResponse:
+        auth_svc = get_auth_service()
+        user = auth_svc.get_user_by_session(request.cookies.get("gp_session"))
+        user_key = user.id if user is not None else (request.client.host if request.client else "anon")
+        return JSONResponse({"thread": auth_svc.create_chat_thread(user_key)})
+
+    @fastapi_app.get("/api/v1/chat/threads/{thread_id}", include_in_schema=False)
+    async def get_chat_thread_messages(request: Request, thread_id: str) -> JSONResponse:
+        auth_svc = get_auth_service()
+        user = auth_svc.get_user_by_session(request.cookies.get("gp_session"))
+        user_key = user.id if user is not None else (request.client.host if request.client else "anon")
+        msgs = auth_svc.get_chat_messages(user_key, thread_id)
+        if msgs is None:
+            return JSONResponse(status_code=404, content={"detail": "Chat thread not found"})
+        return JSONResponse({"thread_id": thread_id, "messages": msgs})
+
+    @fastapi_app.delete("/api/v1/chat/threads/{thread_id}", include_in_schema=False)
+    async def delete_chat_thread(request: Request, thread_id: str) -> JSONResponse:
+        auth_svc = get_auth_service()
+        user = auth_svc.get_user_by_session(request.cookies.get("gp_session"))
+        user_key = user.id if user is not None else (request.client.host if request.client else "anon")
+        deleted = auth_svc.delete_chat_thread(user_key, thread_id)
+        if not deleted:
+            return JSONResponse(status_code=404, content={"detail": "Chat thread not found"})
+        return JSONResponse({"deleted": True})
+
     @fastapi_app.post("/api/v1/chat/stream", include_in_schema=False)
     async def stream_agent_chat(
         request: Request,
@@ -476,16 +519,55 @@ def mount_a2a_agent(
                 },
             )
 
+        thread_id = payload.thread_id
+        prior_msgs: Optional[List[Dict[str, Any]]] = None
+        if thread_id:
+            prior_msgs = auth_svc.get_chat_messages(user_key, thread_id)
+        if prior_msgs is None:
+            created = auth_svc.create_chat_thread(user_key)
+            thread_id = created["id"]
+            prior_msgs = []
+
+        auth_svc.append_chat_message(user_key, thread_id, "user", payload.message)
         obo_token = auth_svc.mint_obo_jwt(user.id) if user is not None else auth_svc.mint_obo_jwt(user_key)
         anon_id = anonymize_user_id(user_key)
 
         async def _event_gen() -> AsyncGenerator[str, None]:
+            yield f"data: {json.dumps({'type': 'thread', 'thread_id': thread_id})}\n\n"
+            recorded_steps: List[Dict[str, Any]] = []
             try:
                 async for ev in agent.stream_events(
                     payload.message,
                     obo_token=obo_token,
                     anon_user_id=anon_id,
+                    history=[{"role": m["role"], "text": m["text"]} for m in (prior_msgs or [])],
+                    session_id=thread_id,
                 ):
+                    if ev.get("type") == "thought":
+                        recorded_steps.append({"kind": "thought", "label": ev.get("text", ""), "status": "done"})
+                    elif ev.get("type") == "tool_call":
+                        recorded_steps.append(
+                            {
+                                "kind": "tool",
+                                "label": ev.get("name", ""),
+                                "detail": json.dumps(ev.get("args") or {}),
+                                "status": "running",
+                            }
+                        )
+                    elif ev.get("type") == "tool_result":
+                        for s in reversed(recorded_steps):
+                            if s.get("kind") == "tool" and s.get("status") == "running":
+                                s["status"] = "done" if ev.get("ok") else "error"
+                                s["detail"] = ev.get("summary")
+                                break
+                    elif ev.get("type") == "answer":
+                        auth_svc.append_chat_message(
+                            user_key,
+                            thread_id,
+                            "bot",
+                            ev.get("text", ""),
+                            steps=recorded_steps,
+                        )
                     yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
             except Exception as exc:
                 yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
