@@ -123,9 +123,13 @@ class PriceSnapshotRecord(PriceHistoryBase):
     product_name: Mapped[str] = mapped_column(String, nullable=False)
     brand: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     price: Mapped[float] = mapped_column(Float, nullable=False)
+    original_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     unit_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    original_unit_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     unit_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     is_on_sale: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    discount_percentage: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    sale_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     is_bio: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_frozen: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     recorded_at: Mapped[datetime] = mapped_column(
@@ -287,6 +291,18 @@ class PriceHistoryService:
         if "is_frozen" not in cols:
             with self.engine.begin() as conn:
                 conn.execute(text("ALTER TABLE price_snapshots ADD COLUMN is_frozen BOOLEAN NOT NULL DEFAULT 0"))
+        if "original_price" not in cols:
+            with self.engine.begin() as conn:
+                conn.execute(text("ALTER TABLE price_snapshots ADD COLUMN original_price FLOAT"))
+        if "original_unit_price" not in cols:
+            with self.engine.begin() as conn:
+                conn.execute(text("ALTER TABLE price_snapshots ADD COLUMN original_unit_price FLOAT"))
+        if "discount_percentage" not in cols:
+            with self.engine.begin() as conn:
+                conn.execute(text("ALTER TABLE price_snapshots ADD COLUMN discount_percentage INTEGER"))
+        if "sale_type" not in cols:
+            with self.engine.begin() as conn:
+                conn.execute(text("ALTER TABLE price_snapshots ADD COLUMN sale_type VARCHAR"))
 
     @staticmethod
     def _normalize_query(query: str) -> str:
@@ -632,6 +648,19 @@ class PriceHistoryService:
         snapshots: List[PriceSnapshotRecord] = []
         for store_name, picks in (("rohlik", r_picks), ("kosik", k_picks)):
             for prod, is_bio_flag, is_frozen_flag in picks:
+                orig_price_val = (
+                    float(prod.original_price) if prod.original_price is not None else None
+                )
+                orig_unit_val: Optional[float] = None
+                if (
+                    orig_price_val is not None
+                    and prod.unit_price is not None
+                    and float(prod.price) > 0
+                    and orig_price_val > float(prod.price)
+                ):
+                    orig_unit_val = round(
+                        float(prod.unit_price) * (orig_price_val / float(prod.price)), 2
+                    )
                 snapshots.append(
                     PriceSnapshotRecord(
                         item_query=norm,
@@ -640,9 +669,13 @@ class PriceHistoryService:
                         product_name=prod.name,
                         brand=prod.brand,
                         price=float(prod.price),
+                        original_price=orig_price_val,
                         unit_price=float(prod.unit_price) if prod.unit_price is not None else None,
+                        original_unit_price=orig_unit_val,
                         unit_type=prod.unit_type.value if prod.unit_type else None,
                         is_on_sale=bool(prod.is_on_sale),
+                        discount_percentage=prod.discount_percentage,
+                        sale_type=prod.sale_type,
                         is_bio=is_bio_flag,
                         is_frozen=is_frozen_flag,
                         recorded_at=ts,

@@ -7,8 +7,10 @@ from fastapi.testclient import TestClient
 from app.clients.rohlik import RohlikStoreClient
 from app.main import app
 from app.api.deps import get_comparison_service, get_price_history_service
-from app.models.enums import StoreType, UnitType
+from app.models.enums import PriceAdvantage, StoreType, UnitType
+from app.models.comparison import ComparisonResponse
 from app.models.product import ProductSale, StoreProduct
+from app.services.matcher import ProductMatchingService
 from app.services.price_history import PriceHistoryService, PriceSnapshotRecord, TrackedItem
 from sqlalchemy.orm import Session
 
@@ -238,4 +240,44 @@ def test_discount_snapshots_and_daily_series_granularity() -> None:
     assert len(rows) == 1
     assert rows[0]["product_id"] == "1482618"
     assert rows[0]["discount_percentage"] == 10
+
+    # Verify record_comparison stores both discounted and non-discounted prices
+    # and that discounted unit prices drive cheapest-option ranking.
+    full_price_prod = StoreProduct(
+        store=StoreType.ROHLIK,
+        product_id="999",
+        name="Other Butter",
+        price=Decimal("42.00"),
+        is_on_sale=False,
+        unit_type=UnitType.KILOGRAM,
+        unit_price=Decimal("168.00"),
+    )
+    ranked = ProductMatchingService().rank_by_unit_price([full_price_prod, prod])
+    assert ranked[0].product_id == "1482618"
+
+    comp = ComparisonResponse(
+        query="butter",
+        query_translated="máslo",
+        rohlik_candidates=[full_price_prod, prod],
+        kosik_candidates=[],
+        rohlik_ranked=ranked,
+        kosik_ranked=[],
+        advantage=PriceAdvantage.ROHLIK_CHEAPER,
+        price_difference=Decimal("0.00"),
+        percentage_savings=Decimal("0.0"),
+        voice_summary="",
+        voice_summary_en="",
+        voice_summary_cs="",
+    )
+    svc.record_comparison(comp, recorded_at=day2)
+    with Session(svc.engine) as session:
+        all_recs = session.query(PriceSnapshotRecord).filter_by(product_id="1482618").all()
+        assert len(all_recs) == 1
+        assert all_recs[0].price == 40.41
+        assert all_recs[0].original_price == 44.9
+        assert all_recs[0].unit_price == 161.64
+        assert all_recs[0].original_unit_price == 179.6
+        assert all_recs[0].discount_percentage == 10
+        assert all_recs[0].sale_type == "premium"
+
     svc.close()
