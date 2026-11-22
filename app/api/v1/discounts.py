@@ -176,9 +176,13 @@ async def get_active_discounts(
             want_r = store in (None, StoreType.ROHLIK)
             want_k = store in (None, StoreType.KOSIK)
             if want_r:
-                tasks.append(comparator.rohlik.search(search_term, limit=per_query_limit))
+                tasks.append(
+                    comparator.rohlik.search(search_term, limit=per_query_limit, use_cache=not refresh)
+                )
             if want_k:
-                tasks.append(comparator.kosik.search(search_term, limit=per_query_limit))
+                tasks.append(
+                    comparator.kosik.search(search_term, limit=per_query_limit, use_cache=not refresh)
+                )
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
             raw_products: List[StoreProduct] = []

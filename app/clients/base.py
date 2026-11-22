@@ -1,9 +1,48 @@
 from abc import ABC, abstractmethod
 from decimal import Decimal
 import re
-from typing import List, Optional, Tuple
+import time
+from typing import Dict, List, Optional, Tuple
 from app.models.enums import StoreType, UnitType
 from app.models.product import StoreProduct
+
+
+class StoreSearchCache:
+    """In-memory 24-hour TTL cache for exact store search queries."""
+
+    def __init__(self, ttl_seconds: int = 86400, max_entries: int = 2000) -> None:
+        self.ttl_seconds = ttl_seconds
+        self.max_entries = max_entries
+        self._entries: Dict[str, Tuple[float, int, List[StoreProduct]]] = {}
+
+    @staticmethod
+    def _normalize_query(query: str) -> str:
+        return " ".join(query.strip().lower().split())
+
+    def get(self, query: str, limit: int) -> Optional[List[StoreProduct]]:
+        """Return cached products for query if fresh and covering at least `limit`."""
+        if self.ttl_seconds <= 0:
+            return None
+        key = self._normalize_query(query)
+        entry = self._entries.get(key)
+        if not entry:
+            return None
+        expires_at, cached_limit, products = entry
+        if time.monotonic() >= expires_at:
+            self._entries.pop(key, None)
+            return None
+        if cached_limit < limit and len(products) >= cached_limit:
+            return None
+        return list(products[:limit])
+
+    def set(self, query: str, limit: int, products: List[StoreProduct]) -> None:
+        """Cache non-empty search results for `ttl_seconds`."""
+        if self.ttl_seconds <= 0 or not products:
+            return
+        if len(self._entries) >= self.max_entries:
+            self._entries.clear()
+        key = self._normalize_query(query)
+        self._entries[key] = (time.monotonic() + self.ttl_seconds, limit, list(products))
 
 
 def normalize_piece_unit_price(

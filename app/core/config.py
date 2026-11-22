@@ -29,6 +29,10 @@ class AppSettings(BaseSettings):
     # Search & Comparison Configuration
     request_timeout_seconds: float = Field(default=10.0, alias="REQUEST_TIMEOUT_SECONDS")
     cache_ttl_seconds: int = Field(default=300, alias="CACHE_TTL_SECONDS")
+    store_search_cache_ttl_seconds: int = Field(
+        default=86400,
+        alias="STORE_SEARCH_CACHE_TTL_SECONDS",
+    )
     min_match_similarity_score: float = Field(default=0.55, alias="MIN_MATCH_SIMILARITY_SCORE")
 
     # Local Ollama LLM Configuration (Optional)

@@ -2,7 +2,7 @@ import logging
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 import httpx
-from app.clients.base import BaseStoreClient, normalize_piece_unit_price
+from app.clients.base import BaseStoreClient, StoreSearchCache, normalize_piece_unit_price
 from app.core.config import settings
 from app.models.enums import StoreType, UnitType
 from app.models.product import ProductSale, StoreProduct
@@ -24,6 +24,9 @@ class RohlikStoreClient(BaseStoreClient):
         self.timeout = timeout
         self.base_url = "https://www.rohlik.cz"
         self._http_client: Optional[httpx.AsyncClient] = None
+        self._search_cache = StoreSearchCache(
+            ttl_seconds=settings.store_search_cache_ttl_seconds
+        )
 
     @property
     def store_type(self) -> StoreType:
@@ -48,8 +51,15 @@ class RohlikStoreClient(BaseStoreClient):
             )
         return self._http_client
 
-    async def search(self, query: str, limit: int = 5) -> List[StoreProduct]:
-        """Search products on Rohlik."""
+    async def search(
+        self, query: str, limit: int = 5, use_cache: bool = True
+    ) -> List[StoreProduct]:
+        """Search products on Rohlik (with 24h in-memory TTL cache for exact queries)."""
+        if use_cache:
+            cached = self._search_cache.get(query, limit)
+            if cached is not None:
+                return cached
+
         client = await self._get_client()
         url = "/services/frontend-service/search-metadata"
         params = {
@@ -80,6 +90,7 @@ class RohlikStoreClient(BaseStoreClient):
                     logger.debug(f"Failed to parse Rohlik item: {exc}")
                     continue
 
+            self._search_cache.set(query, limit, products)
             return products
 
         except httpx.RequestError as exc:

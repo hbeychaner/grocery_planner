@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 import httpx
-from app.clients.base import BaseStoreClient, normalize_piece_unit_price
+from app.clients.base import BaseStoreClient, StoreSearchCache, normalize_piece_unit_price
 from app.core.config import settings
 from app.models.enums import StoreType, UnitType
 from app.models.product import ProductSale, StoreProduct
@@ -26,6 +26,9 @@ class KosikStoreClient(BaseStoreClient):
         self.timeout = timeout
         self.base_url = "https://www.kosik.cz"
         self._http_client: Optional[httpx.AsyncClient] = None
+        self._search_cache = StoreSearchCache(
+            ttl_seconds=settings.store_search_cache_ttl_seconds
+        )
 
     @property
     def store_type(self) -> StoreType:
@@ -52,8 +55,15 @@ class KosikStoreClient(BaseStoreClient):
             )
         return self._http_client
 
-    async def search(self, query: str, limit: int = 5) -> List[StoreProduct]:
-        """Search products on Kosik using Constructor.io + product details."""
+    async def search(
+        self, query: str, limit: int = 5, use_cache: bool = True
+    ) -> List[StoreProduct]:
+        """Search products on Kosik using Constructor.io + product details (with 24h TTL cache)."""
+        if use_cache:
+            cached = self._search_cache.get(query, limit)
+            if cached is not None:
+                return cached
+
         client = await self._get_client()
         encoded_query = quote(query.strip())
         search_url = (
@@ -112,6 +122,7 @@ class KosikStoreClient(BaseStoreClient):
                 if isinstance(prod, StoreProduct) and prod:
                     products.append(prod)
 
+            self._search_cache.set(query, limit, products)
             return products
 
         except Exception as exc:
