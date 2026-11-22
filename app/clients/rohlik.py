@@ -5,7 +5,7 @@ import httpx
 from app.clients.base import BaseStoreClient, normalize_piece_unit_price
 from app.core.config import settings
 from app.models.enums import StoreType, UnitType
-from app.models.product import StoreProduct
+from app.models.product import ProductSale, StoreProduct
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +147,87 @@ class RohlikStoreClient(BaseStoreClient):
         unit_price_raw = unit_price_obj.get("full") if isinstance(unit_price_obj, dict) else unit_price_obj
         unit_price = Decimal(str(unit_price_raw)) if unit_price_raw else None
 
+        # Parse active sales array (e.g. 'premium' / 'For you -10%', 'sale', 'expiration')
+        parsed_sales: List[ProductSale] = []
+        best_non_exp_sale: Optional[ProductSale] = None
+        for raw_sale in item.get("sales") or []:
+            if not isinstance(raw_sale, dict):
+                continue
+            if raw_sale.get("active") is False or raw_sale.get("silent") is True:
+                continue
+            s_price_obj = raw_sale.get("price") or {}
+            s_price_raw = s_price_obj.get("full") if isinstance(s_price_obj, dict) else s_price_obj
+            if s_price_raw is None:
+                continue
+            s_price = Decimal(str(s_price_raw))
+            if s_price <= 0:
+                continue
+
+            s_orig_obj = raw_sale.get("originalPrice") or {}
+            s_orig_raw = s_orig_obj.get("full") if isinstance(s_orig_obj, dict) else s_orig_obj
+            s_orig = Decimal(str(s_orig_raw)) if s_orig_raw and float(s_orig_raw) > float(s_price) else None
+
+            s_unit_obj = raw_sale.get("priceForUnit") or {}
+            s_unit_raw = s_unit_obj.get("full") if isinstance(s_unit_obj, dict) else s_unit_obj
+            s_unit_price = Decimal(str(s_unit_raw)) if s_unit_raw else None
+
+            s_type = str(raw_sale.get("type") or "sale")
+            s_pct_raw = raw_sale.get("discountPercentage")
+            s_pct = int(s_pct_raw) if s_pct_raw is not None else (
+                round((float(s_orig - s_price) / float(s_orig)) * 100)
+                if s_orig and s_orig > s_price
+                else None
+            )
+
+            sale_entry = ProductSale(
+                sale_type=s_type,
+                price=s_price,
+                original_price=s_orig,
+                unit_price=s_unit_price,
+                discount_percentage=s_pct,
+                started_at=raw_sale.get("startedAt"),
+                ends_at=raw_sale.get("endsAt"),
+                remaining=raw_sale.get("remaining"),
+                welcome_price=bool(raw_sale.get("welcomePrice", False)),
+                unlimited_amount=bool(raw_sale.get("unlimitedAmount", False)),
+            )
+            parsed_sales.append(sale_entry)
+
+            # Use lowest single-unit non-expiration sale as the effective comparison price
+            multipack_amt = raw_sale.get("multipackNeedAmount")
+            if s_type.lower() != "expiration" and multipack_amt in (None, 1) and s_price < price:
+                if best_non_exp_sale is None or s_price < best_non_exp_sale.price:
+                    best_non_exp_sale = sale_entry
+
+        discount_percentage: Optional[int] = None
+        sale_type: Optional[str] = None
+        sale_ends_at: Optional[str] = None
+
+        if best_non_exp_sale is not None:
+            original_price = best_non_exp_sale.original_price or price
+            price = best_non_exp_sale.price
+            if best_non_exp_sale.unit_price is not None:
+                unit_price = best_non_exp_sale.unit_price
+            elif original_price > 0 and unit_price is not None:
+                unit_price = (unit_price * price / original_price).quantize(Decimal("0.01"))
+            is_on_sale = True
+            discount_percentage = best_non_exp_sale.discount_percentage
+            sale_type = best_non_exp_sale.sale_type
+            sale_ends_at = best_non_exp_sale.ends_at
+        elif is_on_sale and original_price and original_price > price:
+            discount_percentage = round((float(original_price - price) / float(original_price)) * 100)
+            sale_type = "sale"
+            if not parsed_sales:
+                parsed_sales.append(
+                    ProductSale(
+                        sale_type="sale",
+                        price=price,
+                        original_price=original_price,
+                        unit_price=unit_price,
+                        discount_percentage=discount_percentage,
+                    )
+                )
+
         unit_type, unit_price = normalize_piece_unit_price(
             name=name,
             textual_amount=textual_amount,
@@ -176,6 +257,10 @@ class RohlikStoreClient(BaseStoreClient):
             price=price,
             original_price=original_price,
             is_on_sale=is_on_sale,
+            discount_percentage=discount_percentage,
+            sale_type=sale_type,
+            sale_ends_at=sale_ends_at,
+            sales=parsed_sales,
             unit_type=unit_type,
             unit_price=unit_price,
             package_amount=None,

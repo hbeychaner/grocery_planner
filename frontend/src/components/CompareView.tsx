@@ -8,6 +8,8 @@ interface ProductItem {
   price: number | string;
   original_price?: number | string | null;
   is_on_sale?: boolean;
+  discount_percentage?: number | null;
+  sale_type?: string | null;
   unit_type: string;
   unit_price?: number | string | null;
   package_amount?: number | string | null;
@@ -266,7 +268,8 @@ function StoreColumn({
                   )}
                   {p.is_on_sale && (
                     <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-red-100 text-red-700">
-                      SALE
+                      {p.discount_percentage ? `-${p.discount_percentage}%` : "SALE"}
+                      {p.sale_type === "premium" ? " Xtra" : ""}
                     </span>
                   )}
                   <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-slate-100 text-slate-600">
@@ -280,6 +283,11 @@ function StoreColumn({
                     <span className="text-sm font-bold text-slate-900">
                       {Number(p.price).toFixed(2)} CZK
                     </span>
+                    {p.original_price && Number(p.original_price) > Number(p.price) && (
+                      <span className="text-[11px] text-slate-400 line-through ml-1.5">
+                        {Number(p.original_price).toFixed(2)} CZK
+                      </span>
+                    )}
                     {p.unit_price && (
                       <span className="text-[11px] text-slate-500 ml-2">
                         ({Number(p.unit_price).toFixed(2)} CZK/{p.unit_type})

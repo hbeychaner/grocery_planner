@@ -7,7 +7,7 @@ import httpx
 from app.clients.base import BaseStoreClient, normalize_piece_unit_price
 from app.core.config import settings
 from app.models.enums import StoreType, UnitType
-from app.models.product import StoreProduct
+from app.models.product import ProductSale, StoreProduct
 
 logger = logging.getLogger(__name__)
 
@@ -175,7 +175,6 @@ class KosikStoreClient(BaseStoreClient):
         price = Decimal(str(price_val))
 
         # Sale & original recommended price
-        is_on_sale = bool(item.get("isSale"))
         rec_obj = item.get("recommendedPrice") or item.get("recommendedSellPrice")
         if isinstance(rec_obj, dict):
             rec_val = rec_obj.get("price") or rec_obj.get("amount")
@@ -186,6 +185,18 @@ class KosikStoreClient(BaseStoreClient):
             if (rec_val is not None and float(rec_val) > float(price))
             else None
         )
+        is_on_sale = bool(item.get("isSale")) or bool(original_price and original_price > price)
+        pct_raw = item.get("percentageDiscount")
+        discount_percentage: Optional[int] = (
+            int(pct_raw)
+            if pct_raw
+            else (
+                round((float(original_price - price) / float(original_price)) * 100)
+                if is_on_sale and original_price and original_price > price
+                else None
+            )
+        )
+        sale_ends_at = item.get("lastOrderDay") or None
 
         # Unit mapping & price per unit
         unit_raw = str(item.get("unit") or "").lower()
@@ -227,6 +238,19 @@ class KosikStoreClient(BaseStoreClient):
         else:
             image_url = None
 
+        sales_list: List[ProductSale] = []
+        if is_on_sale:
+            sales_list.append(
+                ProductSale(
+                    sale_type="sale",
+                    price=price,
+                    original_price=original_price,
+                    unit_price=unit_price,
+                    discount_percentage=discount_percentage,
+                    ends_at=sale_ends_at,
+                )
+            )
+
         return StoreProduct(
             store=StoreType.KOSIK,
             product_id=product_id,
@@ -235,6 +259,10 @@ class KosikStoreClient(BaseStoreClient):
             price=price,
             original_price=original_price,
             is_on_sale=is_on_sale,
+            discount_percentage=discount_percentage,
+            sale_type="sale" if is_on_sale else None,
+            sale_ends_at=sale_ends_at if is_on_sale else None,
+            sales=sales_list,
             unit_type=unit_type,
             unit_price=unit_price,
             package_amount=None,

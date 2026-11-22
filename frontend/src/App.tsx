@@ -3,22 +3,28 @@ import { LogOut } from "lucide-react";
 import { fetchAuthStatus, logoutUser, type AuthStatus } from "./api";
 import { ChatSidebar } from "./components/ChatSidebar";
 import { CompareView } from "./components/CompareView";
+import { DiscountsView } from "./components/DiscountsView";
 import { TrendsView } from "./components/TrendsView";
 import { WelcomeAuth } from "./components/WelcomeAuth";
 
+type AppTab = "compare" | "discounts" | "trends";
+
 export function App() {
   const [auth, setAuth] = useState<AuthStatus | null>(null);
-  const [tab, setTab] = useState<"compare" | "trends">(() =>
-    window.location.pathname === "/trends" ? "trends" : "compare"
-  );
+  const [tab, setTab] = useState<AppTab>(() => {
+    if (window.location.pathname === "/trends") return "trends";
+    if (window.location.pathname === "/discounts") return "discounts";
+    return "compare";
+  });
 
   useEffect(() => {
     fetchAuthStatus().then(setAuth);
   }, []);
 
-  function switchTab(next: "compare" | "trends") {
+  function switchTab(next: AppTab) {
     setTab(next);
-    window.history.pushState({}, "", next === "trends" ? "/trends" : "/");
+    const path = next === "trends" ? "/trends" : next === "discounts" ? "/discounts" : "/";
+    window.history.pushState({}, "", path);
   }
 
   async function handleLogout() {
@@ -67,6 +73,15 @@ export function App() {
               </button>
               <button
                 type="button"
+                onClick={() => switchTab("discounts")}
+                className={`px-3 py-1.5 rounded-md font-medium cursor-pointer ${
+                  tab === "discounts" ? "bg-indigo-600 text-white" : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                Discounts
+              </button>
+              <button
+                type="button"
                 onClick={() => switchTab("trends")}
                 className={`px-3 py-1.5 rounded-md font-medium cursor-pointer ${
                   tab === "trends" ? "bg-indigo-600 text-white" : "text-slate-600 hover:text-slate-900"
@@ -104,7 +119,13 @@ export function App() {
       {/* Main Workspace + Right AI Assistant */}
       <div className="flex-1 max-w-[1440px] w-full mx-auto px-6 py-6 flex flex-col lg:flex-row gap-6 items-start">
         <main className="flex-1 min-w-0 w-full">
-          {tab === "compare" ? <CompareView /> : <TrendsView />}
+          {tab === "compare" ? (
+            <CompareView />
+          ) : tab === "discounts" ? (
+            <DiscountsView />
+          ) : (
+            <TrendsView />
+          )}
         </main>
         <ChatSidebar />
       </div>
