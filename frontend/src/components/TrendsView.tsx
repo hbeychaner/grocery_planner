@@ -342,9 +342,39 @@ export function TrendsView() {
           )}
 
           {(() => {
+            // Extend online retailer lines (Blended, Rohlík, Košík, BIO) horizontally backward
+            // from their earliest recorded month so they are visible across the full x-axis.
+            const onlineKeys: Array<keyof SeriesPoint> = [
+              "blended_avg",
+              "avg_rohlik",
+              "avg_kosik",
+              "avg_bio",
+            ];
+            const earliestOnline: Partial<Record<keyof SeriesPoint, number>> = {};
+            for (const key of onlineKeys) {
+              const found = seriesPoints.find((pt) => pt[key] !== null && pt[key] !== undefined);
+              if (found && typeof found[key] === "number") {
+                earliestOnline[key] = found[key] as number;
+              }
+            }
+            const firstIdx: Partial<Record<keyof SeriesPoint, number>> = {};
+            for (const key of onlineKeys) {
+              firstIdx[key] = seriesPoints.findIndex((pt) => pt[key] !== null && pt[key] !== undefined);
+            }
+            const extendedPoints = seriesPoints.map((pt, idx) => {
+              const copy = { ...pt };
+              for (const key of onlineKeys) {
+                const fi = firstIdx[key] ?? -1;
+                if (fi > 0 && idx < fi && copy[key] === null && earliestOnline[key] !== undefined) {
+                  (copy[key] as number | null) = earliestOnline[key]!;
+                }
+              }
+              return copy;
+            });
+
             const visiblePoints = zoomRange
-              ? seriesPoints.slice(zoomRange[0], zoomRange[1] + 1)
-              : seriesPoints;
+              ? extendedPoints.slice(zoomRange[0], zoomRange[1] + 1)
+              : extendedPoints;
             return (
               <>
                 <div className="h-80 w-full select-none">
@@ -395,7 +425,7 @@ export function TrendsView() {
                   </ResponsiveContainer>
                 </div>
                 <p className="text-[11px] text-slate-400">
-                  Tip: Drag across months to zoom in, use the range slider, or click any point to inspect monthly values.
+                  Tip: Drag across months to zoom in, use the range slider, or click any point to inspect monthly values. Online retailer lines are extended horizontally from their earliest sweep.
                 </p>
                 {inspectedPoint && (
                   <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs flex flex-wrap items-center justify-between gap-2">
