@@ -38,9 +38,14 @@ class PriceTrackerRunner:
         self.history = history
         self.concurrency = concurrency
         self.delay_between_requests = delay_between_requests
+        self._run_lock = asyncio.Lock()
 
     async def run(self, limit: Optional[int] = None) -> TrackerRunResult:
         """Fetch current prices for active tracked items and record unit-price snapshots."""
+        async with self._run_lock:
+            return await self._run_locked(limit=limit)
+
+    async def _run_locked(self, limit: Optional[int] = None) -> TrackerRunResult:
         started_dt = datetime.now(timezone.utc)
         t0 = time.monotonic()
 

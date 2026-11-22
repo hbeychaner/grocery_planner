@@ -275,8 +275,11 @@ class PriceHistoryService:
             Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
             self.engine = create_engine(
                 f"sqlite:///{Path(self.db_path).resolve()}",
-                connect_args={"check_same_thread": False},
+                connect_args={"check_same_thread": False, "timeout": 30.0},
             )
+            with self.engine.begin() as conn:
+                conn.execute(text("PRAGMA journal_mode=WAL"))
+                conn.execute(text("PRAGMA busy_timeout=30000"))
 
         PriceHistoryBase.metadata.create_all(self.engine)
         self._ensure_columns()

@@ -11,7 +11,7 @@ from typing import Optional
 import uuid
 
 from pydantic import BaseModel
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, create_engine, delete, select
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, create_engine, delete, select, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 from sqlalchemy.pool import StaticPool
 
@@ -102,8 +102,11 @@ class AuthService:
             Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
             self.engine = create_engine(
                 f"sqlite:///{Path(self.db_path).resolve()}",
-                connect_args={"check_same_thread": False},
+                connect_args={"check_same_thread": False, "timeout": 30.0},
             )
+            with self.engine.begin() as conn:
+                conn.execute(text("PRAGMA journal_mode=WAL"))
+                conn.execute(text("PRAGMA busy_timeout=30000"))
         AuthBase.metadata.create_all(self.engine)
 
     @staticmethod

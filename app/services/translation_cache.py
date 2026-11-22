@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
-from sqlalchemy import Boolean, DateTime, Index, Integer, String, Text, create_engine, func, select
+from sqlalchemy import Boolean, DateTime, Index, Integer, String, Text, create_engine, func, select, text
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 from sqlalchemy.pool import StaticPool
@@ -91,8 +91,11 @@ class TranslationCacheService:
             Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
             self.engine = create_engine(
                 f"sqlite:///{Path(self.db_path).resolve()}",
-                connect_args={"check_same_thread": False},
+                connect_args={"check_same_thread": False, "timeout": 30.0},
             )
+            with self.engine.begin() as conn:
+                conn.execute(text("PRAGMA journal_mode=WAL"))
+                conn.execute(text("PRAGMA busy_timeout=30000"))
 
         TranslationBase.metadata.create_all(self.engine)
 
