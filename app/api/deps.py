@@ -3,6 +3,7 @@ from app.clients.base import BaseStoreClient
 from app.clients.rohlik import RohlikStoreClient
 from app.clients.kosik import KosikStoreClient
 from app.clients.kupi import KupiClient
+from app.services.auth import AuthService
 from app.services.bilingual import BilingualQueryService
 from app.services.bls_client import BlsPriceIngestionService
 from app.services.comparator import PriceComparisonService
@@ -65,6 +66,12 @@ _csu_service = CsuPriceIngestionService(
     matcher=_matcher_service,
 )
 _bls_service = BlsPriceIngestionService(history=_price_history_service)
+_auth_service = AuthService()
+
+
+def get_auth_service() -> AuthService:
+    """Dependency provider for AuthService."""
+    return _auth_service
 
 
 def get_comparison_service() -> PriceComparisonService:

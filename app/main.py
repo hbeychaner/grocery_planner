@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.deps import (
+    get_auth_service,
     get_kosik_client,
     get_kupi_client,
     get_monitoring_service,
@@ -17,6 +18,7 @@ from app.api.deps import (
     get_rohlik_client,
     get_translation_cache,
 )
+from app.api.v1.auth import google_oauth_router
 from app.api.v1.router import api_v1_router
 from app.a2a_agent import mount_a2a_agent
 from app.core.config import settings
@@ -42,6 +44,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await ollama.close()
     cache.close()
     price_history.close()
+    get_auth_service().close()
     monitoring.shutdown()
 
 
@@ -124,8 +127,9 @@ static_dir = settings.base_dir / "static"
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
-# Include API v1 router
+# Include API v1 router and Google OAuth routes
 app.include_router(api_v1_router)
+app.include_router(google_oauth_router)
 
 # Build and mount FastMCP server (exposing /api/v1/* as MCP tools at /mcp)
 mcp_server = create_mcp_server(app)

@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field, field_validator
 from app.core.config import settings
 from app.services.monitoring import MonitoringService
 from app.services.relevance_dataset import record_relevance_decision
+from app.services.translation_dataset import record_translation_event
 
 logger = logging.getLogger(__name__)
 
@@ -252,6 +253,18 @@ Return ONLY JSON:
                                 usage_details={"input": resp.input_tokens, "output": resp.output_tokens},
                                 cost_details=resp.cost_usd,
                             )
+                        record_translation_event(
+                            query=query,
+                            source_lang=analysis.source_language,
+                            target_lang="cs",
+                            translated_term=analysis.query_cs or next(iter(analysis.translations.values()), query),
+                            category=analysis.category,
+                            model=self.model,
+                            provider=self.provider_name,
+                            monitoring=self.monitoring,
+                            trace_id=getattr(span, "trace_id", None),
+                            observation_id=getattr(span, "id", None),
+                        )
                         return analysis
             except Exception as exc:
                 logger.debug(f"{self.provider_name} query analysis skipped or failed: {exc}")

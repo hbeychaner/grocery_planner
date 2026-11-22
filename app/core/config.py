@@ -80,6 +80,24 @@ class AppSettings(BaseSettings):
         default="grocery-relevance-classification",
         alias="LANGFUSE_RELEVANCE_DATASET",
     )
+    translation_dataset_path: Path = Field(
+        default=base_dir / "data" / "translation_dataset.jsonl",
+        alias="TRANSLATION_DATASET_PATH",
+    )
+    langfuse_translation_dataset: str = Field(
+        default="grocery-translation-accuracy",
+        alias="LANGFUSE_TRANSLATION_DATASET",
+    )
+
+    # Users, Sessions & Google OAuth (Optional, Free Tier)
+    users_db_path: Path = Field(
+        default=base_dir / "data" / "users.db",
+        alias="USERS_DB_PATH",
+    )
+    session_ttl_hours: int = Field(default=168, alias="SESSION_TTL_HOURS")
+    google_client_id: Optional[str] = Field(default=None, alias="GOOGLE_CLIENT_ID")
+    google_client_secret: Optional[str] = Field(default=None, alias="GOOGLE_CLIENT_SECRET")
+    google_redirect_uri: Optional[str] = Field(default=None, alias="GOOGLE_REDIRECT_URI")
 
 
 settings = AppSettings()
