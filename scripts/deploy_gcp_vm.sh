@@ -6,8 +6,20 @@ set -euo pipefail
 # For EU low-latency (~15ms from Prague), run:
 #   ZONE=europe-central2-a REGION=europe-central2 ./scripts/deploy_gcp_vm.sh
 
-PROJECT_ID="${PROJECT_ID:-$(gcloud config get-value project 2>/dev/null || true)}"
-PROJECT_ID="${PROJECT_ID:-grocery-planner-515506}"
+_read_env_var() {
+  local key="$1"
+  if [ -f ".env" ]; then
+    grep -E "^${key}=" .env 2>/dev/null | tail -n 1 | cut -d '=' -f2- | tr -d '"' | tr -d "'" | tr -d '\r' || true
+  fi
+}
+
+PROJECT_ID="${PROJECT_ID:-${GCP_PROJECT_ID:-$(_read_env_var GCP_PROJECT_ID)}}"
+if [ -z "$PROJECT_ID" ]; then
+  PROJECT_ID="$(gcloud config get-value project 2>/dev/null || true)"
+fi
+PUBLIC_DOMAIN="${PUBLIC_DOMAIN:-$(_read_env_var PUBLIC_DOMAIN)}"
+DUCKDNS_DOMAIN="${DUCKDNS_DOMAIN:-$(_read_env_var DUCKDNS_DOMAIN)}"
+DUCKDNS_TOKEN="${DUCKDNS_TOKEN:-$(_read_env_var DUCKDNS_TOKEN)}"
 REGION="${REGION:-us-central1}"
 ZONE="${ZONE:-us-central1-a}"
 VM_NAME="${VM_NAME:-grocery-planner-vm}"
@@ -16,7 +28,7 @@ MACHINE_TYPE="${MACHINE_TYPE:-e2-micro}"
 APP_DIR="/opt/grocery_planner"
 
 if [ -z "$PROJECT_ID" ]; then
-  echo "ERROR: Set PROJECT_ID=<your-gcp-project-id> or run 'gcloud config set project <id>'."
+  echo "ERROR: Set GCP_PROJECT_ID in .env, pass PROJECT_ID=<id>, or run 'gcloud config set project <id>'."
   exit 1
 fi
 
