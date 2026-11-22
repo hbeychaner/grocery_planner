@@ -89,7 +89,7 @@ start:
 
 open-browser:
 	@echo "5. Opening Google Chrome tabs..."
-	@open -a "Google Chrome" "$(APP_URL)" "$(APP_URL)/trends" "$(DOCS_URL)" "$(LANGFUSE_URL)"
+	@open -a "Google Chrome" "$(APP_URL)/trends" "$(LANGFUSE_URL)" "$(APP_URL)"
 
 track-prices:
 	$(PYTHON) -m scripts.run_weekly_check

@@ -101,15 +101,20 @@ async def security_and_cache_middleware(request: Request, call_next: Any) -> Res
 
     response = await call_next(request)
 
-    # Security headers
+    # Security headers (allow Swagger UI inline script on /docs and /redoc)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    script_src = (
+        "'self' 'unsafe-inline' https://cdn.jsdelivr.net"
+        if path in ("/docs", "/redoc")
+        else "'self' https://cdn.jsdelivr.net"
+    )
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
-        "script-src 'self' https://cdn.jsdelivr.net; "
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        f"script-src {script_src}; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; "
         "font-src 'self' https://fonts.gstatic.com; "
         "img-src 'self' https: data:; "
         "connect-src 'self'; "
