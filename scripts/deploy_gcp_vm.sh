@@ -92,9 +92,10 @@ fi
 
 # 6. Provision Python, Caddy, systemd services on the VM
 if [ -n "${DUCKDNS_DOMAIN:-}" ] && [ -n "${DUCKDNS_TOKEN:-}" ]; then
-  echo "==> Updating DuckDNS record '${DUCKDNS_DOMAIN}.duckdns.org' -> $VM_IP..."
-  curl -sf "https://www.duckdns.org/update?domains=${DUCKDNS_DOMAIN}&token=${DUCKDNS_TOKEN}&ip=${VM_IP}" >/dev/null
-  DEFAULT_DOMAIN="${DUCKDNS_DOMAIN}.duckdns.org"
+  DUCKDNS_SUB="${DUCKDNS_DOMAIN%.duckdns.org}"
+  echo "==> Updating DuckDNS record '${DUCKDNS_SUB}.duckdns.org' -> $VM_IP..."
+  curl -sf "https://www.duckdns.org/update?domains=${DUCKDNS_SUB}&token=${DUCKDNS_TOKEN}&ip=${VM_IP}" >/dev/null
+  DEFAULT_DOMAIN="${DUCKDNS_SUB}.duckdns.org"
 else
   DEFAULT_DOMAIN="${PUBLIC_DOMAIN:-${VM_IP//./-}.sslip.io}"
 fi
