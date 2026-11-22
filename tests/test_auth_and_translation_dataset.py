@@ -121,3 +121,30 @@ async def test_backfill_and_annotate_translations(tmp_path: Path) -> None:
     mock_mon.record_score.assert_called_once()
     assert ds_file.exists()
     cache.close()
+
+
+@pytest.mark.asyncio
+async def test_require_auth_gate_blocks_unauthenticated_api(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.api import deps
+    from app.core.config import settings
+
+    test_auth = AuthService(db_path=tmp_path / "users.db")
+    monkeypatch.setattr(deps, "_auth_service", test_auth)
+    monkeypatch.setattr(settings, "require_auth", True)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        blocked = await ac.get("/api/v1/history/items")
+        assert blocked.status_code == 401
+
+        reg = await ac.post(
+            "/api/v1/auth/register",
+            json={"email": "gate@example.com", "password": "Password123"},
+        )
+        assert reg.status_code == 200
+
+        allowed = await ac.get("/api/v1/history/items")
+        assert allowed.status_code == 200
+    test_auth.close()

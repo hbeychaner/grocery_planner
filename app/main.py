@@ -76,6 +76,27 @@ async def security_and_cache_middleware(request: Request, call_next: Any) -> Res
     """Enforce optional API key on admin mutations, rate limiting, security headers, and dev cache control."""
     path = request.url.path
 
+    # Require authenticated session (or API token) for protected API & A2A routes when enabled
+    if settings.require_auth and (
+        path.startswith("/api/v1/compare")
+        or path.startswith("/api/v1/history")
+        or path.startswith("/api/v1/staples")
+        or path.startswith("/a2a")
+    ):
+        session_cookie = request.cookies.get("gp_session")
+        user = get_auth_service().get_user_by_session(session_cookie)
+        auth_header = request.headers.get("Authorization", "")
+        bearer = auth_header[7:].strip() if auth_header.startswith("Bearer ") else ""
+        api_key = request.headers.get("X-API-Key", "")
+        provided_tok = bearer or api_key
+        has_api_token = bool(
+            settings.api_auth_token
+            and provided_tok
+            and secrets.compare_digest(provided_tok, settings.api_auth_token)
+        )
+        if user is None and not has_api_token:
+            return JSONResponse(status_code=401, content={"detail": "Authentication required"})
+
     # Optional bearer / X-API-Key protection on mutating / ingestion endpoints
     if settings.api_auth_token and (
         path in _ADMIN_PATHS
@@ -127,8 +148,11 @@ async def security_and_cache_middleware(request: Request, call_next: Any) -> Res
         response.headers["Expires"] = "0"
     return response
 
-# Mount static assets
+# Mount static assets and built React SPA assets
 static_dir = settings.base_dir / "static"
+frontend_dist_dir = settings.base_dir / "frontend" / "dist"
+if (frontend_dist_dir / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=str(frontend_dist_dir / "assets")), name="frontend-assets")
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
@@ -150,16 +174,16 @@ mount_a2a_agent(
 
 @app.get("/", include_in_schema=False)
 async def serve_index() -> FileResponse:
-    """Serve the lightweight web application UI."""
-    index_file = static_dir / "index.html"
-    return FileResponse(index_file)
+    """Serve the React SPA (or legacy static fallback)."""
+    spa_index = frontend_dist_dir / "index.html"
+    return FileResponse(spa_index if spa_index.exists() else (static_dir / "index.html"))
 
 
 @app.get("/trends", include_in_schema=False)
 async def serve_trends() -> FileResponse:
-    """Serve the price-per-unit history & trends dashboard."""
-    trends_file = static_dir / "trends.html"
-    return FileResponse(trends_file)
+    """Serve the React SPA trends route (or legacy static fallback)."""
+    spa_index = frontend_dist_dir / "index.html"
+    return FileResponse(spa_index if spa_index.exists() else (static_dir / "trends.html"))
 
 
 @app.get("/health", tags=["Health"])

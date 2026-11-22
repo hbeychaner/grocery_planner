@@ -117,7 +117,7 @@ async def test_trends_page_and_history_endpoints() -> None:
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         trends_resp = await ac.get("/trends")
         assert trends_resp.status_code == 200
-        assert "Weekly Grocery Price Trends" in trends_resp.text
+        assert "Grocery Planner" in trends_resp.text or "Weekly Grocery Price Trends" in trends_resp.text
 
         items_resp = await ac.get("/api/v1/history/items")
         assert items_resp.status_code == 200

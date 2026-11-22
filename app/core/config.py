@@ -47,6 +47,7 @@ class AppSettings(BaseSettings):
     mcp_server_url: Optional[str] = Field(default=None, alias="MCP_SERVER_URL")
 
     # Security & Rate Limiting
+    require_auth: bool = Field(default=True, alias="REQUIRE_AUTH")
     api_auth_token: Optional[str] = Field(default=None, alias="API_AUTH_TOKEN")
     rate_limit_per_minute: int = Field(default=60, alias="RATE_LIMIT_PER_MINUTE")
 

@@ -14,6 +14,7 @@ from app.models.product import StoreProduct
 def _isolate_test_telemetry(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Prevent unit tests from writing test items to live Langfuse or data/relevance_training.jsonl."""
     monkeypatch.setattr(settings, "langfuse_enabled", False)
+    monkeypatch.setattr(settings, "require_auth", False)
     monkeypatch.setattr(settings, "relevance_dataset_path", tmp_path / "relevance_training.jsonl")
     monkeypatch.setattr(deps._monitoring_service, "enabled", False)
     monkeypatch.setattr(deps._monitoring_service, "_client", None)
