@@ -1,4 +1,4 @@
-.PHONY: start stop stop-all restart test health open-browser langfuse-up langfuse-down track-prices help
+.PHONY: start stop stop-all restart test health open-browser langfuse-up langfuse-down track-prices caddy-start caddy-stop help
 
 PYTHON := ./.venv/bin/python3
 UVICORN := ./.venv/bin/uvicorn
@@ -41,6 +41,8 @@ help:
 	@echo "  make health        Check /health endpoint, Langfuse, and Ollama status"
 	@echo "  make test          Run offline pytest suite"
 	@echo "  make track-prices  Run weekly grocery price tracking sweep (all items)"
+	@echo "  make caddy-start   Start Caddy HTTPS reverse proxy (requires PUBLIC_DOMAIN in .env)"
+	@echo "  make caddy-stop    Stop Caddy reverse proxy"
 
 langfuse-up:
 	@echo "Starting self-hosted Langfuse (Docker Compose)..."
@@ -90,7 +92,7 @@ start:
 		lsof -ti :8000 | xargs kill -9 2>/dev/null || true; \
 		sleep 1; \
 	fi
-	@nohup $(UVICORN) app.main:app --host 0.0.0.0 --port 8000 --reload $(UVICORN_SSL_FLAGS) >/tmp/grocery_planner.log 2>&1 &
+	@nohup $(UVICORN) app.main:app --host 0.0.0.0 --port 8000 --reload --proxy-headers --forwarded-allow-ips=127.0.0.1 $(UVICORN_SSL_FLAGS) >/tmp/grocery_planner.log 2>&1 &
 	@echo "4. Waiting for backend health check..."
 	@for i in $$(seq 1 15); do \
 		if curl -sfk $(APP_URL)/health >/dev/null 2>&1; then \
@@ -129,3 +131,15 @@ health:
 
 test:
 	HF_HUB_OFFLINE=1 $(PYTEST) -v
+
+caddy-start:
+	@PUBLIC_DOMAIN=$$(grep -E '^PUBLIC_DOMAIN=' .env 2>/dev/null | cut -d '=' -f2- | tr -d '"' | tr -d "'"); \
+	if [ -z "$$PUBLIC_DOMAIN" ]; then \
+		echo "ERROR: Set PUBLIC_DOMAIN=yourname.duckdns.org in .env first."; \
+		exit 1; \
+	fi; \
+	PUBLIC_DOMAIN="$$PUBLIC_DOMAIN" nohup caddy run --config Caddyfile >/tmp/caddy_grocery.log 2>&1 & \
+	echo "Caddy started for https://$$PUBLIC_DOMAIN (logs: /tmp/caddy_grocery.log)"
+
+caddy-stop:
+	@pkill -f "caddy run --config Caddyfile" 2>/dev/null && echo "Caddy stopped." || echo "Caddy not running."
