@@ -150,12 +150,8 @@ class ProductMatchingService:
                 match_confidence=1.0,
             )
 
-        # 1. Attempt brand/exact product match across supermarkets
-        brand_match = self._find_brand_match(query, query_cs, r_filtered, k_filtered)
-        if brand_match:
-            return brand_match
-
-        # 2. Default for generic staples: Pick the best value deal (lowest unit price) from each store
+        # Pick the best value deal (lowest unit price) from each store so primary_pair
+        # always matches the #1 Best Value item shown at index 0 of each ranked list.
         r_best = self._get_best_unit_price(r_filtered)
         k_best = self._get_best_unit_price(k_filtered)
 

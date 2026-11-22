@@ -156,3 +156,63 @@ def test_filter_enforces_multi_lemma_coverage_and_dominant_unit() -> None:
         "apple cider vinegar",
     )
     assert [p.product_id for p in filtered] == ["v1", "v2"]
+
+
+def test_find_best_pair_uses_best_unit_price_on_tie() -> None:
+    matcher = ProductMatchingService()
+    r_best = StoreProduct(
+        store=StoreType.ROHLIK,
+        product_id="r1",
+        name="Pilsner Urquell pivo ležák světlý",
+        brand="Pilsner Urquell",
+        price=Decimal("31.90"),
+        unit_price=Decimal("63.80"),
+        unit_type=UnitType.LITER,
+        quantity=Decimal("0.5"),
+        in_stock=True,
+    )
+    r_other = StoreProduct(
+        store=StoreType.ROHLIK,
+        product_id="r2",
+        name="Pilsner Urquell plech 6x0.5l",
+        brand="Pilsner Urquell",
+        price=Decimal("264.00"),
+        unit_price=Decimal("88.00"),
+        unit_type=UnitType.LITER,
+        quantity=Decimal("3.0"),
+        in_stock=True,
+    )
+    k_best = StoreProduct(
+        store=StoreType.KOSIK,
+        product_id="k1",
+        name="Pilsner Urquell světlý ležák, sklo",
+        brand="Pilsner Urquell",
+        price=Decimal("31.90"),
+        unit_price=Decimal("63.80"),
+        unit_type=UnitType.LITER,
+        quantity=Decimal("0.5"),
+        in_stock=True,
+    )
+    k_other = StoreProduct(
+        store=StoreType.KOSIK,
+        product_id="k2",
+        name="Pilsner Urquell plech 6x0.5l",
+        brand="Pilsner Urquell",
+        price=Decimal("286.74"),
+        unit_price=Decimal("95.58"),
+        unit_type=UnitType.LITER,
+        quantity=Decimal("3.0"),
+        in_stock=True,
+    )
+
+    pair = matcher.find_best_pair(
+        "pilsner urquell",
+        "pilsner urquell",
+        [r_other, r_best],
+        [k_other, k_best],
+    )
+    assert pair is not None
+    assert pair.rohlik_product.product_id == "r1"
+    assert pair.kosik_product.product_id == "k1"
+    assert pair.advantage == PriceAdvantage.TIED
+    assert pair.price_difference == Decimal("0.00")
