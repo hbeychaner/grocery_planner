@@ -84,3 +84,47 @@ export async function sendA2AMessage(text: string): Promise<string> {
   const texts = parts.map((p: { text?: string }) => p.text).filter(Boolean);
   return texts.length > 0 ? texts.join("\n") : JSON.stringify(res);
 }
+
+export type AgentStreamEvent =
+  | { type: "thinking"; turn: number }
+  | { type: "thought"; turn: number; text: string }
+  | { type: "tool_call"; turn: number; name: string; args: Record<string, unknown> }
+  | { type: "tool_result"; turn: number; name: string; ok: boolean; summary: string }
+  | { type: "answer"; text: string }
+  | { type: "error"; message: string };
+
+export async function streamAgentChat(
+  message: string,
+  onEvent: (event: AgentStreamEvent) => void
+): Promise<void> {
+  const resp = await fetch("/a2a/stream", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message }),
+  });
+  if (!resp.ok || !resp.body) {
+    const errBody = await resp.json().catch(() => ({}));
+    throw new Error(errBody.detail || "Assistant request failed");
+  }
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const chunks = buffer.split("\n\n");
+    buffer = chunks.pop() || "";
+    for (const chunk of chunks) {
+      const line = chunk
+        .split("\n")
+        .find((l) => l.startsWith("data: "));
+      if (!line) continue;
+      const jsonStr = line.slice(6).trim();
+      if (!jsonStr) continue;
+      const ev: AgentStreamEvent = JSON.parse(jsonStr);
+      onEvent(ev);
+    }
+  }
+}

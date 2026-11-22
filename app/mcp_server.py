@@ -27,10 +27,10 @@ def create_mcp_server(
     route_maps = [
         # Exclude auth endpoints from LLM tool surface
         RouteMap(pattern=r"^/api/v1/auth/.*", mcp_type=MCPType.EXCLUDE),
-        # Expose all remaining /api/v1/* endpoints as MCP tools
-        RouteMap(pattern=r"^/api/v1/.*", mcp_type=MCPType.TOOL),
-        # Exclude UI, health, A2A, and docs routes from MCP tool surface
-        RouteMap(pattern=r"^/(?!api/v1/).*", mcp_type=MCPType.EXCLUDE),
+        # Strictly read-only: only expose GET endpoints under /api/v1/* (no POST/PUT/PATCH/DELETE)
+        RouteMap(methods=["GET"], pattern=r"^/api/v1/.*", mcp_type=MCPType.TOOL),
+        # Exclude all non-GET methods and non-/api/v1/ routes
+        RouteMap(methods="*", pattern=r".*", mcp_type=MCPType.EXCLUDE),
     ]
     httpx_kwargs = (
         {"headers": {"X-Internal-MCP-Token": internal_token}}

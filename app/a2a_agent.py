@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, AsyncGenerator, Dict, List, Optional, Union
 
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
@@ -224,6 +224,86 @@ class GroceryMCPAgent:
 
             return "Reached maximum tool-calling steps without a final answer.", stats
 
+    async def stream_events(
+        self,
+        user_message: str,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Stream structured thinking, tool call, tool result, and final answer events."""
+        async with self._build_mcp_client() as mcp_client:
+            mcp_tools = await mcp_client.list_tools()
+            tool_defs = [
+                {
+                    "name": t.name,
+                    "description": t.description or t.name,
+                    "parameters": t.input_schema or {"type": "object", "properties": {}},
+                }
+                for t in mcp_tools
+            ]
+            messages: List[Dict[str, Any]] = [{"role": "user", "content": user_message}]
+
+            for turn in range(6):
+                yield {"type": "thinking", "turn": turn + 1}
+                llm_resp = await self.llm.generate(
+                    messages,
+                    system_instruction=SYSTEM_INSTRUCTION,
+                    tools=tool_defs or None,
+                    temperature=0.2,
+                    max_tokens=1024,
+                )
+                if llm_resp is None:
+                    yield {"type": "answer", "text": "I couldn't generate a response."}
+                    return
+
+                if not llm_resp.function_calls:
+                    yield {"type": "answer", "text": llm_resp.text or "I couldn't generate a response."}
+                    return
+
+                if llm_resp.text and llm_resp.text.strip():
+                    yield {"type": "thought", "turn": turn + 1, "text": llm_resp.text.strip()}
+
+                if llm_resp.raw_content:
+                    messages.append(llm_resp.raw_content)
+
+                tool_results: List[Dict[str, Any]] = []
+                for fc in llm_resp.function_calls:
+                    yield {"type": "tool_call", "turn": turn + 1, "name": fc.name, "args": fc.args}
+                    ok = True
+                    try:
+                        mcp_result = await mcp_client.call_tool(fc.name, fc.args)
+                        text_chunks = [
+                            getattr(c, "text", str(c))
+                            for c in (mcp_result.content or [])
+                        ]
+                        raw_output = "\n".join(text_chunks) if text_chunks else "{}"
+                        try:
+                            parsed_output: Any = json.loads(raw_output)
+                        except json.JSONDecodeError:
+                            parsed_output = {"result": raw_output}
+                    except Exception as exc:
+                        ok = False
+                        logger.warning("MCP tool '%s' failed: %s", fc.name, exc)
+                        parsed_output = {"error": str(exc)}
+
+                    summary = json.dumps(parsed_output, ensure_ascii=False)
+                    if len(summary) > 220:
+                        summary = summary[:217] + "..."
+                    yield {
+                        "type": "tool_result",
+                        "turn": turn + 1,
+                        "name": fc.name,
+                        "ok": ok,
+                        "summary": summary,
+                    }
+                    tool_results.append({"name": fc.name, "response": parsed_output})
+
+                if self.llm.provider_name == "ollama":
+                    for tr in tool_results:
+                        messages.append({"role": "tool", "content": json.dumps(tr["response"])})
+                else:
+                    messages.append({"role": "tool_results", "results": tool_results})
+
+            yield {"type": "answer", "text": "Reached maximum tool-calling steps without a final answer."}
+
 
 class GroceryA2AExecutor(AgentExecutor):
     """A2A AgentExecutor bridging A2A tasks to GroceryMCPAgent."""
@@ -325,4 +405,26 @@ def mount_a2a_agent(
         jsonrpc_routes=create_jsonrpc_routes(request_handler, rpc_url="/a2a", enable_v0_3_compat=True),
         rest_routes=create_rest_routes(request_handler, path_prefix="/a2a/rest", enable_v0_3_compat=True),
     )
+
+    from fastapi.responses import StreamingResponse
+    from pydantic import BaseModel
+
+    class _ChatStreamRequest(BaseModel):
+        message: str
+
+    @fastapi_app.post("/a2a/stream", include_in_schema=False)
+    async def stream_agent_chat(payload: _ChatStreamRequest) -> StreamingResponse:
+        async def _event_gen() -> AsyncGenerator[str, None]:
+            try:
+                async for ev in agent.stream_events(payload.message):
+                    yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+            except Exception as exc:
+                yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+
+        return StreamingResponse(
+            _event_gen(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
     return agent_card
