@@ -36,6 +36,7 @@ class MonitoringService:
         self.secret_key = secret_key or settings.langfuse_secret_key
         self.host = host or settings.langfuse_host
         self._client: Optional[Langfuse] = None
+        self._ensured_datasets: set[str] = set()
 
         if self.enabled and self.public_key and self.secret_key:
             try:
@@ -56,6 +57,74 @@ class MonitoringService:
     def is_active(self) -> bool:
         """Return True when Langfuse client is initialized and ready."""
         return self._client is not None
+
+    @property
+    def client(self) -> Optional[Langfuse]:
+        """Return underlying Langfuse client if initialized."""
+        return self._client
+
+    def ensure_dataset(self, name: str, description: str = "") -> bool:
+        """Idempotently ensure a Langfuse dataset exists."""
+        if not self._client:
+            return False
+        if name in self._ensured_datasets:
+            return True
+        try:
+            self._client.create_dataset(name=name, description=description or None)
+            self._ensured_datasets.add(name)
+            return True
+        except Exception as exc:
+            logger.debug(f"Langfuse ensure_dataset '{name}' skipped: {exc}")
+            return False
+
+    def log_dataset_item(
+        self,
+        dataset_name: str,
+        input_data: Any,
+        expected_output: Any,
+        metadata: Optional[Dict[str, Any]] = None,
+        source_trace_id: Optional[str] = None,
+        source_observation_id: Optional[str] = None,
+    ) -> None:
+        """Create a Langfuse dataset item linked to its source trace/observation."""
+        if not self._client:
+            return
+        self.ensure_dataset(dataset_name)
+        try:
+            self._client.create_dataset_item(
+                dataset_name=dataset_name,
+                input=input_data,
+                expected_output=expected_output,
+                metadata=metadata,
+                source_trace_id=source_trace_id,
+                source_observation_id=source_observation_id,
+            )
+        except Exception as exc:
+            logger.debug(f"Langfuse log_dataset_item skipped: {exc}")
+
+    def record_score(
+        self,
+        name: str,
+        value: float | str,
+        trace_id: Optional[str] = None,
+        observation_id: Optional[str] = None,
+        data_type: Literal["NUMERIC", "CATEGORICAL", "BOOLEAN"] = "NUMERIC",
+        comment: Optional[str] = None,
+    ) -> None:
+        """Attach a Langfuse evaluation score to a trace or observation."""
+        if not self._client or not trace_id:
+            return
+        try:
+            self._client.create_score(
+                name=name,
+                value=value,
+                trace_id=trace_id,
+                observation_id=observation_id,
+                data_type=data_type,
+                comment=comment,
+            )
+        except Exception as exc:
+            logger.debug(f"Langfuse record_score '{name}' skipped: {exc}")
 
     @contextmanager
     def trace_observation(

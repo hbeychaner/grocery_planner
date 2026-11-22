@@ -68,6 +68,14 @@ class AppSettings(BaseSettings):
         default=base_dir / "data" / "price_history.db",
         alias="PRICE_HISTORY_DB_PATH",
     )
+    relevance_dataset_path: Path = Field(
+        default=base_dir / "data" / "relevance_training.jsonl",
+        alias="RELEVANCE_DATASET_PATH",
+    )
+    langfuse_relevance_dataset: str = Field(
+        default="grocery-relevance-classification",
+        alias="LANGFUSE_RELEVANCE_DATASET",
+    )
 
 
 settings = AppSettings()
