@@ -119,10 +119,19 @@ def test_discounts_endpoint_filters_expiration_and_store() -> None:
     )
 
     mock_comp = MagicMock()
-    mock_comp.rohlik_client = MagicMock()
-    mock_comp.rohlik_client.search = AsyncMock(return_value=[rohlik_item])
-    mock_comp.kosik_client = MagicMock()
-    mock_comp.kosik_client.search = AsyncMock(return_value=[kosik_exp_only])
+    mock_comp.rohlik = MagicMock()
+    mock_comp.rohlik.search = AsyncMock(return_value=[rohlik_item])
+    mock_comp.kosik = MagicMock()
+    mock_comp.kosik.search = AsyncMock(return_value=[kosik_exp_only])
+    mock_comp.ollama = None
+    mock_comp.bilingual = MagicMock()
+    mock_comp.bilingual.translate_query_async = AsyncMock(
+        return_value=MagicMock(primary_term="máslo")
+    )
+    mock_comp.matcher = MagicMock()
+    mock_comp.matcher._filter_relevant_products = MagicMock(
+        side_effect=lambda _term, prods, _label: prods
+    )
 
     mock_hist = MagicMock()
     mock_hist.list_tracked_items = MagicMock(
@@ -145,5 +154,9 @@ def test_discounts_endpoint_filters_expiration_and_store() -> None:
         assert body_no_exp["total_discounts"] == 1
         assert body_no_exp["items"][0]["product"]["product_id"] == "1482618"
         assert body_no_exp["items"][0]["best_sale"]["sale_type"] == "premium"
+
+        resp_q = client.get("/api/v1/discounts?q=butter")
+        assert resp_q.status_code == 200
+        assert resp_q.json()["total_discounts"] == 2
     finally:
         app.dependency_overrides.clear()

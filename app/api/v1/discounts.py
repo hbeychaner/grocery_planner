@@ -83,8 +83,11 @@ async def get_active_discounts(
     targets: List[Tuple[str, str, Optional[str]]] = []
     if q and q.strip():
         clean_q = q.strip()
-        translated = await comparator.bilingual_service.translate_query(clean_q, "en")
-        targets.append((clean_q, translated, None))
+        translation = await comparator.bilingual.translate_query_async(
+            clean_q,
+            ollama_service=comparator.ollama,
+        )
+        targets.append((clean_q, translation.primary_term or clean_q, None))
     else:
         tracked = history.list_tracked_items(active_only=True)[:limit_items]
         for item in tracked:
@@ -103,9 +106,9 @@ async def get_active_discounts(
             want_r = store in (None, StoreType.ROHLIK)
             want_k = store in (None, StoreType.KOSIK)
             if want_r:
-                tasks.append(comparator.rohlik_client.search(search_term, limit=per_query_limit))
+                tasks.append(comparator.rohlik.search(search_term, limit=per_query_limit))
             if want_k:
-                tasks.append(comparator.kosik_client.search(search_term, limit=per_query_limit))
+                tasks.append(comparator.kosik.search(search_term, limit=per_query_limit))
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
             raw_products: List[StoreProduct] = []
