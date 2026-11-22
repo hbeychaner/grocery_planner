@@ -3,8 +3,23 @@
 PYTHON := ./.venv/bin/python3
 UVICORN := ./.venv/bin/uvicorn
 PYTEST := ./.venv/bin/pytest
-APP_URL := http://localhost:8000
-DOCS_URL := http://localhost:8000/docs
+SSL_CERT ?= 192.168.2.47+2.pem
+SSL_KEY ?= 192.168.2.47+2-key.pem
+ifneq ($(wildcard $(SSL_CERT)),)
+ifneq ($(wildcard $(SSL_KEY)),)
+	APP_URL := https://localhost:8000
+	DOCS_URL := https://localhost:8000/docs
+	UVICORN_SSL_FLAGS := --ssl-keyfile $(SSL_KEY) --ssl-certfile $(SSL_CERT)
+else
+	APP_URL := http://localhost:8000
+	DOCS_URL := http://localhost:8000/docs
+	UVICORN_SSL_FLAGS :=
+endif
+else
+	APP_URL := http://localhost:8000
+	DOCS_URL := http://localhost:8000/docs
+	UVICORN_SSL_FLAGS :=
+endif
 OLLAMA_URL := http://localhost:11434
 LANGFUSE_COMPOSE := docker-compose.langfuse.yml
 
@@ -75,10 +90,10 @@ start:
 		lsof -ti :8000 | xargs kill -9 2>/dev/null || true; \
 		sleep 1; \
 	fi
-	@nohup $(UVICORN) app.main:app --host 0.0.0.0 --port 8000 --reload >/tmp/grocery_planner.log 2>&1 &
+	@nohup $(UVICORN) app.main:app --host 0.0.0.0 --port 8000 --reload $(UVICORN_SSL_FLAGS) >/tmp/grocery_planner.log 2>&1 &
 	@echo "4. Waiting for backend health check..."
 	@for i in $$(seq 1 15); do \
-		if curl -sf $(APP_URL)/health >/dev/null 2>&1; then \
+		if curl -sfk $(APP_URL)/health >/dev/null 2>&1; then \
 			echo "   Backend is up!"; \
 			break; \
 		fi; \
@@ -108,7 +123,7 @@ stop-all: stop langfuse-down
 restart: stop start
 
 health:
-	@curl -s $(APP_URL)/health | $(PYTHON) -m json.tool
+	@curl -sk $(APP_URL)/health | $(PYTHON) -m json.tool
 	@echo "Langfuse UI: $$(curl -sf $(LANGFUSE_URL)/api/public/health >/dev/null 2>&1 && echo 'healthy' || echo 'unreachable')"
 	@ollama ps
 
