@@ -85,7 +85,7 @@ async def test_grocery_mcp_agent_executes_mcp_tool_with_gemini() -> None:
     mock_monitoring.trace_generation.return_value.__enter__ = MagicMock(return_value=mock_span)
     mock_monitoring.trace_generation.return_value.__exit__ = MagicMock(return_value=False)
 
-    with patch("app.a2a_agent.genai.Client", return_value=mock_genai):
+    with patch("app.services.llm.genai.Client", return_value=mock_genai):
         agent = GroceryMCPAgent(
             mcp_target=mcp_server,
             api_key="test-key",
@@ -101,3 +101,11 @@ async def test_grocery_mcp_agent_executes_mcp_tool_with_gemini() -> None:
         assert len(gen_updates) == 2
         assert gen_updates[0]["usage_details"]["total"] == 120
         assert gen_updates[1]["cost_details"]["total"] > 0
+
+
+def test_create_llm_service_switches_providers() -> None:
+    """create_llm_service factory should return OllamaLLMService or GeminiLLMService."""
+    from app.services.llm import GeminiLLMService, OllamaLLMService, create_llm_service
+
+    assert isinstance(create_llm_service("ollama"), OllamaLLMService)
+    assert isinstance(create_llm_service("gemini"), GeminiLLMService)

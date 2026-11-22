@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from typing import Any, Dict, List, Optional, Union
 
 from a2a.server.agent_execution import AgentExecutor, RequestContext
@@ -37,39 +36,16 @@ from a2a.types import (
 from fastapi import FastAPI
 from fastmcp import Client, FastMCP
 from fastmcp.client.transports import StreamableHttpTransport
-from google import genai
-from google.genai import types as genai_types
 
 from app.core.config import settings
+from app.services.llm import (
+    BaseLLMService,
+    GeminiLLMService,
+    create_llm_service,
+)
 from app.services.monitoring import MonitoringService
 
 logger = logging.getLogger(__name__)
-
-# Per-1M-token USD pricing for explicit Langfuse cost_details tracking
-_GEMINI_PRICING_PER_1M: Dict[str, Dict[str, float]] = {
-    "gemini-3.5-flash": {"input": 0.30, "cached_input": 0.075, "output": 2.50},
-    "gemini-2.5-flash": {"input": 0.30, "cached_input": 0.075, "output": 2.50},
-    "gemini-2.0-flash": {"input": 0.10, "cached_input": 0.025, "output": 0.40},
-}
-
-
-def _compute_gemini_cost(
-    model: str,
-    input_tokens: int,
-    output_tokens: int,
-    cached_tokens: int = 0,
-    thoughts_tokens: int = 0,
-) -> Dict[str, float]:
-    """Calculate USD cost breakdown for a Gemini generation."""
-    rates = _GEMINI_PRICING_PER_1M.get(model, _GEMINI_PRICING_PER_1M["gemini-3.5-flash"])
-    billable_input = max(0, input_tokens - cached_tokens)
-    in_cost = (billable_input * rates["input"] + cached_tokens * rates["cached_input"]) / 1_000_000.0
-    out_cost = ((output_tokens + thoughts_tokens) * rates["output"]) / 1_000_000.0
-    return {
-        "input": round(in_cost, 8),
-        "output": round(out_cost, 8),
-        "total": round(in_cost + out_cost, 8),
-    }
 
 SYSTEM_INSTRUCTION = (
     "You are the Grocery Planner AI assistant for Prague supermarkets (Rohlík.cz and Košík.cz), "
@@ -79,34 +55,26 @@ SYSTEM_INSTRUCTION = (
 )
 
 
-def _clean_json_schema(schema: Any) -> Any:
-    """Strip JSON Schema keys not accepted by Gemini FunctionDeclaration."""
-    if isinstance(schema, dict):
-        cleaned: Dict[str, Any] = {}
-        for k, v in schema.items():
-            if k in ("$schema", "additionalProperties", "title", "default"):
-                continue
-            cleaned[k] = _clean_json_schema(v)
-        return cleaned
-    if isinstance(schema, list):
-        return [_clean_json_schema(item) for item in schema]
-    return schema
-
-
 class GroceryMCPAgent:
-    """Gemini 3.5 Flash agent that discovers and invokes backend tools via FastMCP."""
+    """A2A agent that discovers and invokes backend tools via FastMCP using BaseLLMService."""
 
     def __init__(
         self,
         mcp_target: Union[FastMCP, str],
+        llm_service: Optional[BaseLLMService] = None,
         api_key: Optional[str] = None,
         model: Optional[str] = None,
         monitoring: Optional[MonitoringService] = None,
     ) -> None:
         self.mcp_target = mcp_target
-        self.api_key = api_key or settings.gemini_api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-        self.model = model or settings.gemini_model
         self.monitoring = monitoring or MonitoringService()
+        if llm_service is not None:
+            self.llm = llm_service
+        elif api_key is not None or model is not None:
+            self.llm = GeminiLLMService(api_key=api_key, model=model, monitoring=self.monitoring)
+        else:
+            self.llm = create_llm_service(settings.agent_llm_provider, monitoring=self.monitoring)
+        self.model = self.llm.model
 
     def _build_mcp_client(self) -> Client:
         if isinstance(self.mcp_target, str):
@@ -114,18 +82,23 @@ class GroceryMCPAgent:
         return Client(self.mcp_target)
 
     async def run(self, user_message: str, context_id: Optional[str] = None) -> str:
-        """Run a multi-turn Gemini 3.5 Flash tool-calling loop over FastMCP tools with Langfuse tracing."""
-        if not self.api_key:
+        """Run a multi-turn LLM tool-calling loop over FastMCP tools with Langfuse tracing."""
+        if not await self.llm.health_check():
             return (
-                "Gemini API key is not configured. Please set `GEMINI_API_KEY` in your `.env` "
-                "file and restart the server to chat with Gemini 3.5 Flash."
+                f"LLM provider '{self.llm.provider_name}' is not configured or reachable. "
+                "Please check your `.env` settings (e.g. `GEMINI_API_KEY` or `OLLAMA_BASE_URL`)."
             )
 
         with self.monitoring.trace_observation(
             name="a2a-grocery-agent",
             as_type="agent",
             input_data={"message": user_message},
-            metadata={"model": self.model, "protocol": "a2a-1.0", "context_id": context_id},
+            metadata={
+                "model": self.model,
+                "provider": self.llm.provider_name,
+                "protocol": "a2a-1.0",
+                "context_id": context_id,
+            },
             flush_on_exit=True,
         ) as root_span:
             reply, stats = await self._run_loop(user_message)
@@ -134,6 +107,7 @@ class GroceryMCPAgent:
                     output={"reply": reply},
                     metadata={
                         "model": self.model,
+                        "provider": self.llm.provider_name,
                         "turns": stats["turns"],
                         "tool_calls": stats["tool_calls"],
                         "total_input_tokens": stats["input_tokens"],
@@ -144,7 +118,6 @@ class GroceryMCPAgent:
             return reply
 
     async def _run_loop(self, user_message: str) -> tuple[str, Dict[str, Any]]:
-        genai_client = genai.Client(api_key=self.api_key)
         stats: Dict[str, Any] = {"turns": 0, "tool_calls": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
 
         async with self._build_mcp_client() as mcp_client:
@@ -157,95 +130,73 @@ class GroceryMCPAgent:
                 if tools_span is not None:
                     tools_span.update(output={"tool_count": len(mcp_tools), "tools": [t.name for t in mcp_tools]})
 
-            declarations = [
-                genai_types.FunctionDeclaration(
-                    name=t.name,
-                    description=(t.description or t.name)[:512],
-                    parameters_json_schema=_clean_json_schema(t.input_schema or {"type": "object", "properties": {}}),
-                )
+            tool_defs = [
+                {
+                    "name": t.name,
+                    "description": t.description or t.name,
+                    "parameters": t.input_schema or {"type": "object", "properties": {}},
+                }
                 for t in mcp_tools
             ]
-            tool_config = genai_types.GenerateContentConfig(
-                system_instruction=SYSTEM_INSTRUCTION,
-                tools=[genai_types.Tool(function_declarations=declarations)] if declarations else None,
-                temperature=0.2,
-            )
-
-            contents: List[genai_types.Content] = [
-                genai_types.Content(
-                    role="user",
-                    parts=[genai_types.Part.from_text(text=user_message)],
-                )
-            ]
+            messages: List[Dict[str, Any]] = [{"role": "user", "content": user_message}]
 
             for turn in range(6):
                 stats["turns"] = turn + 1
                 with self.monitoring.trace_generation(
-                    name=f"gemini-turn-{turn + 1}",
+                    name=f"{self.llm.provider_name}-turn-{turn + 1}",
                     model=self.model,
-                    input_data={"turn": turn + 1, "message_count": len(contents), "user_message": user_message if turn == 0 else None},
+                    input_data={"turn": turn + 1, "message_count": len(messages), "user_message": user_message if turn == 0 else None},
                     model_parameters={"temperature": 0.2},
                 ) as gen_span:
-                    response = await genai_client.aio.models.generate_content(
-                        model=self.model,
-                        contents=contents,
-                        config=tool_config,
+                    llm_resp = await self.llm.generate(
+                        messages,
+                        system_instruction=SYSTEM_INSTRUCTION,
+                        tools=tool_defs or None,
+                        temperature=0.2,
+                        max_tokens=1024,
                     )
+                    if llm_resp is None:
+                        return "I couldn't generate a response.", stats
 
-                    usage_meta = getattr(response, "usage_metadata", None)
-                    in_tok = int(getattr(usage_meta, "prompt_token_count", 0) or 0)
-                    out_tok = int(getattr(usage_meta, "candidates_token_count", 0) or 0)
-                    cached_tok = int(getattr(usage_meta, "cached_content_token_count", 0) or 0)
-                    thought_tok = int(getattr(usage_meta, "thoughts_token_count", 0) or 0)
-                    tot_tok = int(getattr(usage_meta, "total_token_count", 0) or (in_tok + out_tok + thought_tok))
-                    cost_details = _compute_gemini_cost(self.model, in_tok, out_tok, cached_tok, thought_tok)
-
-                    stats["input_tokens"] += in_tok
-                    stats["output_tokens"] += out_tok + thought_tok
-                    stats["cost_usd"] += cost_details["total"]
+                    stats["input_tokens"] += llm_resp.input_tokens
+                    stats["output_tokens"] += llm_resp.output_tokens + llm_resp.thoughts_tokens
+                    stats["cost_usd"] += llm_resp.cost_usd.get("total", 0.0)
 
                     if gen_span is not None:
                         usage_details: Dict[str, int] = {
-                            "input": in_tok,
-                            "output": out_tok,
-                            "total": tot_tok,
+                            "input": llm_resp.input_tokens,
+                            "output": llm_resp.output_tokens,
+                            "total": llm_resp.total_tokens,
                         }
-                        if cached_tok:
-                            usage_details["input_cache_read"] = cached_tok
-                        if thought_tok:
-                            usage_details["output_reasoning"] = thought_tok
+                        if llm_resp.cached_tokens:
+                            usage_details["input_cache_read"] = llm_resp.cached_tokens
+                        if llm_resp.thoughts_tokens:
+                            usage_details["output_reasoning"] = llm_resp.thoughts_tokens
 
-                        fc_out = [
-                            {"name": fc.name, "args": dict(fc.args) if fc.args else {}}
-                            for fc in (response.function_calls or [])
-                        ]
+                        fc_out = [{"name": fc.name, "args": fc.args} for fc in llm_resp.function_calls]
                         gen_span.update(
-                            output={"text": response.text, "function_calls": fc_out} if fc_out else (response.text or ""),
+                            output={"text": llm_resp.text, "function_calls": fc_out} if fc_out else (llm_resp.text or ""),
                             usage_details=usage_details,
-                            cost_details=cost_details,
+                            cost_details=llm_resp.cost_usd,
                         )
 
-                if not response.function_calls:
-                    return (response.text or "I couldn't generate a response."), stats
+                if not llm_resp.function_calls:
+                    return (llm_resp.text or "I couldn't generate a response."), stats
 
-                # Append model turn with function calls
-                if response.candidates and response.candidates[0].content:
-                    contents.append(response.candidates[0].content)
+                if llm_resp.raw_content:
+                    messages.append(llm_resp.raw_content)
 
-                # Execute every requested MCP tool via FastMCP Client
-                tool_parts: List[genai_types.Part] = []
-                for fc in response.function_calls:
+                tool_results: List[Dict[str, Any]] = []
+                for fc in llm_resp.function_calls:
                     stats["tool_calls"] += 1
-                    tool_name = fc.name or ""
-                    tool_args = dict(fc.args) if fc.args else {}
                     with self.monitoring.trace_observation(
-                        name=f"mcp-tool:{tool_name}",
+                        name=f"mcp-tool:{fc.name}",
                         as_type="tool",
-                        input_data=tool_args,
-                        metadata={"tool_name": tool_name},
+                        input_data=fc.args,
+                        metadata={"tool_name": fc.name},
                     ) as tool_span:
                         try:
-                            mcp_result = await mcp_client.call_tool(tool_name, tool_args)
+                            mcp_result = await mcp_client.call_tool(fc.name, fc.args)
                             text_chunks = [
                                 getattr(c, "text", str(c))
                                 for c in (mcp_result.content or [])
@@ -258,19 +209,18 @@ class GroceryMCPAgent:
                             if tool_span is not None:
                                 tool_span.update(output=parsed_output)
                         except Exception as exc:
-                            logger.warning("MCP tool '%s' failed: %s", tool_name, exc)
+                            logger.warning("MCP tool '%s' failed: %s", fc.name, exc)
                             parsed_output = {"error": str(exc)}
                             if tool_span is not None:
                                 tool_span.update(level="ERROR", status_message=str(exc), output=parsed_output)
 
-                    tool_parts.append(
-                        genai_types.Part.from_function_response(
-                            name=tool_name,
-                            response=parsed_output if isinstance(parsed_output, dict) else {"result": parsed_output},
-                        )
-                    )
+                    tool_results.append({"name": fc.name, "response": parsed_output})
 
-                contents.append(genai_types.Content(role="user", parts=tool_parts))
+                if self.llm.provider_name == "ollama":
+                    for tr in tool_results:
+                        messages.append({"role": "tool", "content": json.dumps(tr["response"])})
+                else:
+                    messages.append({"role": "tool_results", "results": tool_results})
 
             return "Reached maximum tool-calling steps without a final answer.", stats
 

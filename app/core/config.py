@@ -39,7 +39,9 @@ class AppSettings(BaseSettings):
     ollama_think: bool = Field(default=False, alias="OLLAMA_THINK")
     ollama_max_concurrency: int = Field(default=1, alias="OLLAMA_MAX_CONCURRENCY")
 
-    # Gemini & MCP/A2A Agent Configuration
+    # Gemini & Per-Service LLM Provider Configuration
+    comparison_llm_provider: str = Field(default="ollama", alias="COMPARISON_LLM_PROVIDER")
+    agent_llm_provider: str = Field(default="gemini", alias="AGENT_LLM_PROVIDER")
     gemini_api_key: Optional[str] = Field(default=None, alias="GEMINI_API_KEY")
     gemini_model: str = Field(default="gemini-3.5-flash", alias="GEMINI_MODEL")
     mcp_server_url: Optional[str] = Field(default=None, alias="MCP_SERVER_URL")

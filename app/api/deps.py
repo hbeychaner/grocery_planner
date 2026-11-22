@@ -7,6 +7,7 @@ from app.services.bilingual import BilingualQueryService
 from app.services.bls_client import BlsPriceIngestionService
 from app.services.comparator import PriceComparisonService
 from app.services.csu_client import CsuPriceIngestionService
+from app.services.llm import BaseLLMService, create_llm_service
 from app.services.matcher import ProductMatchingService
 from app.services.monitoring import MonitoringService
 from app.services.ollama import OllamaService
@@ -26,13 +27,18 @@ _bilingual_service = BilingualQueryService(cache_service=_translation_cache)
 _matcher_service = ProductMatchingService()
 _voice_formatter = VoiceResponseFormatter()
 _ollama_service = OllamaService(monitoring=_monitoring_service)
+_comparison_llm: BaseLLMService = (
+    _ollama_service
+    if settings.comparison_llm_provider.strip().lower() == "ollama"
+    else create_llm_service(settings.comparison_llm_provider, monitoring=_monitoring_service)
+)
 _comparator_service = PriceComparisonService(
     rohlik_client=_rohlik_client,
     kosik_client=_kosik_client,
     bilingual_service=_bilingual_service,
     matching_service=_matcher_service,
     voice_formatter=_voice_formatter,
-    ollama_service=_ollama_service,
+    ollama_service=_comparison_llm,  # type: ignore[arg-type]
 )
 _price_history_service = PriceHistoryService()
 _price_history_service.seed_from_yaml(settings.tracked_groceries_config_path)
