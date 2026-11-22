@@ -15,9 +15,11 @@ try:
 except ImportError:
     _HAS_TRANSFORMERS = False
 
+from app.core.config import settings
 from app.models.enums import PriceAdvantage, StoreType, UnitType
 from app.models.product import StoreProduct
 from app.models.comparison import MatchedProductPair
+from app.services.embeddings import pairwise_cosine_similarity
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +65,7 @@ class ProductMatchingService:
             except Exception:
                 cls._nlp_en = spacy.blank("en")
 
-        if cls._embedding_model is None and _HAS_TRANSFORMERS:
+        if cls._embedding_model is None and _HAS_TRANSFORMERS and settings.embedding_provider.strip().lower() == "local":
             try:
                 # Use cached local weights to operate seamlessly offline
                 os.environ.setdefault("HF_HUB_OFFLINE", "1")
@@ -277,17 +279,12 @@ class ProductMatchingService:
             if brand_collides:
                 continue
 
-            # Check 2: Semantic embedding similarity if available
-            if self._embedding_model is not None:
-                try:
-                    target_query = query_cs or query or ""
-                    embs = self._embedding_model.encode([target_query, eval_name], convert_to_tensor=True)
-                    sem_sim = float(util.cos_sim(embs[0], embs[1])[0][0])
-                    if sem_sim >= 0.50:
-                        partial_matches.append(p)
-                        continue
-                except Exception:
-                    pass
+            # Check 2: Semantic embedding similarity if available (Gemini or local)
+            target_query = query_cs or query or ""
+            sem_sim = pairwise_cosine_similarity(target_query, eval_name)
+            if sem_sim is not None and sem_sim >= 0.50:
+                partial_matches.append(p)
+                continue
 
         # When multi-word Czech query has exact full-lemma matches (e.g. "jablečný" + "ocet"),
         # drop partial matches (e.g. plain "ocet kvasný lihový" or "džus jablečný").
@@ -423,15 +420,11 @@ class ProductMatchingService:
         else:
             jaccard = 0.0
 
-        # Semantic embedding cosine similarity using multilingual model
-        if cls._embedding_model is not None:
-            try:
-                embs = cls._embedding_model.encode([title_a, title_b], convert_to_tensor=True)
-                sem_sim = float(util.cos_sim(embs[0], embs[1])[0][0])
-                # Combined metric: 60% multilingual semantic embedding + 40% lemmatized token overlap
-                score = 0.6 * sem_sim + 0.4 * jaccard
-            except Exception:
-                score = jaccard
+        # Semantic embedding cosine similarity using configured provider (Gemini or local)
+        sem_sim = pairwise_cosine_similarity(title_a, title_b)
+        if sem_sim is not None:
+            # Combined metric: 60% multilingual semantic embedding + 40% lemmatized token overlap
+            score = 0.6 * sem_sim + 0.4 * jaccard
         else:
             # Fallback to lemmatized token Jaccard + sequence matcher ratio
             from difflib import SequenceMatcher

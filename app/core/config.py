@@ -42,8 +42,10 @@ class AppSettings(BaseSettings):
     # Gemini & Per-Service LLM Provider Configuration
     comparison_llm_provider: str = Field(default="ollama", alias="COMPARISON_LLM_PROVIDER")
     agent_llm_provider: str = Field(default="gemini", alias="AGENT_LLM_PROVIDER")
+    embedding_provider: str = Field(default="local", alias="EMBEDDING_PROVIDER")
     gemini_api_key: Optional[str] = Field(default=None, alias="GEMINI_API_KEY")
     gemini_model: str = Field(default="gemini-3.5-flash", alias="GEMINI_MODEL")
+    gemini_embedding_model: str = Field(default="gemini-embedding-001", alias="GEMINI_EMBEDDING_MODEL")
     mcp_server_url: Optional[str] = Field(default=None, alias="MCP_SERVER_URL")
 
     # Security & Rate Limiting

@@ -392,24 +392,17 @@ class PriceHistoryService:
         q_ascii = ProductMatchingService._strip_accents(q_clean)
         q_tokens = set(q_ascii.split())
 
-        # Compute multilingual semantic similarity when embedding model is available
+        # Compute multilingual semantic similarity via configured embedding provider (Gemini or local)
         sem_scores: List[float] = [0.0] * len(items)
-        ProductMatchingService._init_nlp()
-        emb_model = ProductMatchingService._embedding_model
-        if emb_model is not None:
-            try:
-                from sentence_transformers import util as st_util
+        try:
+            from app.services.embeddings import batch_cosine_similarities
 
-                texts = [
-                    f"{it.query} {it.query_cs or ''}".strip()
-                    for it in items
-                ]
-                q_emb = emb_model.encode([q_clean], convert_to_tensor=True)
-                item_embs = emb_model.encode(texts, convert_to_tensor=True)
-                sims = st_util.cos_sim(q_emb, item_embs)[0].tolist()
+            texts = [f"{it.query} {it.query_cs or ''}".strip() for it in items]
+            sims = batch_cosine_similarities(q_clean, texts)
+            if sims is not None:
                 sem_scores = [max(0.0, float(s)) for s in sims]
-            except Exception:
-                pass
+        except Exception:
+            pass
 
         scored: List[tuple[float, TrackedItem]] = []
         for idx, it in enumerate(items):
