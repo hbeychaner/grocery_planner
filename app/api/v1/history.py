@@ -81,6 +81,16 @@ async def list_tracked_items(
     )
 
 
+@router.get("/items/search", response_model=list[TrackedItem])
+async def search_tracked_items(
+    q: str = Query(default="", description="Search query (accent-insensitive + semantic ranking)"),
+    category: Optional[str] = Query(default=None, description="Optional category filter"),
+    history: PriceHistoryService = Depends(get_price_history_service),
+) -> list[TrackedItem]:
+    """Return tracked items ranked by accent-insensitive lexical and semantic similarity."""
+    return history.rank_tracked_items(query=q, category=category)
+
+
 @router.post("/items", response_model=TrackedItem)
 async def add_tracked_item(
     payload: AddTrackedItemRequest,

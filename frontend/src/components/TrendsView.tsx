@@ -51,8 +51,13 @@ export function TrendsView() {
   const [seriesPoints, setSeriesPoints] = useState<SeriesPoint[]>([]);
   const [stats, setStats] = useState<{ tracked_items_count?: number; total_snapshots?: number; last_recorded_at?: string }>({});
   const [items, setItems] = useState<TrackedItem[]>([]);
+  const [rankedItems, setRankedItems] = useState<TrackedItem[] | null>(null);
   const [filterText, setFilterText] = useState("");
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
+
+  function stripAccents(str: string): string {
+    return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  }
 
   async function loadDashboard(cat = selectedCategory, m = mode, norm = normalizeByIncome, d = days) {
     const [analyticsResp, seriesResp, itemsResp] = await Promise.all([
@@ -80,6 +85,25 @@ export function TrendsView() {
     loadDashboard();
   }, [selectedCategory, mode, normalizeByIncome, days]);
 
+  useEffect(() => {
+    const q = filterText.trim();
+    if (!q) {
+      setRankedItems(null);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const catParam = selectedCategory !== "overall" ? `&category=${encodeURIComponent(selectedCategory)}` : "";
+        const resp = await fetch(`/api/v1/history/items/search?q=${encodeURIComponent(q)}${catParam}`);
+        if (resp.ok) {
+          const data: TrackedItem[] = await resp.json();
+          setRankedItems(data);
+        }
+      } catch (_) {}
+    }, 180);
+    return () => clearTimeout(timer);
+  }, [filterText, selectedCategory]);
+
   async function triggerAction(endpoint: string, label: string) {
     setStatusMsg(`Running ${label}...`);
     try {
@@ -103,15 +127,27 @@ export function TrendsView() {
         : `${v.toFixed(2)} CZK`
       : "—";
 
-  const filteredItems = items.filter((it) => {
-    const matchesCat = selectedCategory === "overall" || it.category === selectedCategory;
-    const q = filterText.trim().toLowerCase();
-    const matchesText =
-      !q ||
-      it.query.toLowerCase().includes(q) ||
-      (it.query_cs && it.query_cs.toLowerCase().includes(q));
-    return matchesCat && matchesText;
-  });
+  const filteredItems = (() => {
+    const q = stripAccents(filterText.trim());
+    if (!q) {
+      return items.filter((it) => selectedCategory === "overall" || it.category === selectedCategory);
+    }
+    if (rankedItems) {
+      return rankedItems;
+    }
+    const base = items.filter((it) => selectedCategory === "overall" || it.category === selectedCategory);
+    return [...base].sort((a, b) => {
+      const score = (it: TrackedItem) => {
+        const en = stripAccents(it.query);
+        const cs = stripAccents(it.query_cs || "");
+        if (en === q || cs === q) return 4;
+        if (en.startsWith(q) || cs.startsWith(q)) return 3;
+        if (en.includes(q) || cs.includes(q)) return 2;
+        return 0;
+      };
+      return score(b) - score(a);
+    });
+  })();
 
   return (
     <div className="space-y-5">

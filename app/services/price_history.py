@@ -328,6 +328,64 @@ class PriceHistoryService:
                 session.execute(stmt)
                 session.commit()
 
+    def rank_tracked_items(
+        self, query: str, category: Optional[str] = None
+    ) -> List[TrackedItem]:
+        """Rank tracked items by accent-insensitive lexical match + multilingual semantic similarity."""
+        items = self.list_tracked_items(active_only=True)
+        if category and category != "overall":
+            items = [it for it in items if (it.category or "other") == category]
+        q_clean = " ".join((query or "").strip().lower().split())
+        if not q_clean or not items:
+            return items
+
+        q_ascii = ProductMatchingService._strip_accents(q_clean)
+        q_tokens = set(q_ascii.split())
+
+        # Compute multilingual semantic similarity when embedding model is available
+        sem_scores: List[float] = [0.0] * len(items)
+        ProductMatchingService._init_nlp()
+        emb_model = ProductMatchingService._embedding_model
+        if emb_model is not None:
+            try:
+                from sentence_transformers import util as st_util
+
+                texts = [
+                    f"{it.query} {it.query_cs or ''}".strip()
+                    for it in items
+                ]
+                q_emb = emb_model.encode([q_clean], convert_to_tensor=True)
+                item_embs = emb_model.encode(texts, convert_to_tensor=True)
+                sims = st_util.cos_sim(q_emb, item_embs)[0].tolist()
+                sem_scores = [max(0.0, float(s)) for s in sims]
+            except Exception:
+                pass
+
+        scored: List[tuple[float, TrackedItem]] = []
+        for idx, it in enumerate(items):
+            en_norm = ProductMatchingService._strip_accents(it.query.lower())
+            cs_norm = ProductMatchingService._strip_accents((it.query_cs or "").lower())
+            combined = f"{en_norm} {cs_norm}".strip()
+            c_tokens = set(combined.split())
+
+            lex = 0.0
+            if q_ascii == en_norm or q_ascii == cs_norm:
+                lex = 1.0
+            elif en_norm.startswith(q_ascii) or cs_norm.startswith(q_ascii):
+                lex = 0.9
+            elif q_ascii in en_norm or q_ascii in cs_norm:
+                lex = 0.75
+            elif q_tokens and q_tokens <= c_tokens:
+                lex = 0.65
+            elif q_tokens & c_tokens:
+                lex = 0.45 * (len(q_tokens & c_tokens) / len(q_tokens))
+
+            total_score = (0.55 * sem_scores[idx]) + (0.45 * lex)
+            scored.append((total_score, it))
+
+        scored.sort(key=lambda pair: pair[0], reverse=True)
+        return [it for _, it in scored]
+
     def add_tracked_item(
         self, query: str, query_cs: Optional[str] = None, category: Optional[str] = None
     ) -> TrackedItem:

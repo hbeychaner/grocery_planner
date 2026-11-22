@@ -435,3 +435,16 @@ def test_income_normalized_analytics_and_series() -> None:
     assert series.points[0].avg_csu == analytics.overall.avg_csu_unit_price
     assert series.points[0].avg_bls == analytics.overall.avg_bls_unit_price
     history.close()
+
+
+def test_rank_tracked_items_accent_insensitive_and_semantic() -> None:
+    """Typing 'ovesne' without diacritics must rank 'ovesné mléko' first without dropping items."""
+    history = PriceHistoryService(db_path=Path(":memory:"))
+    history.add_tracked_item("butter", query_cs="máslo", category="dairy")
+    history.add_tracked_item("oat milk", query_cs="ovesné mléko", category="milk_alternatives")
+    history.add_tracked_item("whole milk", query_cs="plnotučné mléko", category="dairy")
+
+    ranked = history.rank_tracked_items("ovesne")
+    assert len(ranked) == 3
+    assert ranked[0].query == "oat milk"
+    history.close()
