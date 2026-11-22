@@ -51,7 +51,7 @@ export function TrendsView() {
   const [normalizeByIncome, setNormalizeByIncome] = useState(false);
   const [rebaseIndex, setRebaseIndex] = useState(false);
   const [granularity, setGranularity] = useState<"daily" | "monthly">("daily");
-  const [days, setDays] = useState("730");
+  const [days, setDays] = useState("3650");
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [selectedCategory, setSelectedCategory] = useState("overall");
   const [seriesPoints, setSeriesPoints] = useState<SeriesPoint[]>([]);
@@ -342,6 +342,14 @@ export function TrendsView() {
             const visiblePoints = zoomRange
               ? extendedPoints.slice(zoomRange[0], zoomRange[1] + 1)
               : extendedPoints;
+            const bothMarketStartIdx = extendedPoints.findIndex(
+              (pt) =>
+                pt.avg_csu !== null &&
+                pt.avg_csu !== undefined &&
+                pt.avg_bls !== null &&
+                pt.avg_bls !== undefined
+            );
+            const defaultBrushStart = bothMarketStartIdx >= 0 ? bothMarketStartIdx : 0;
             return (
               <>
                 <div className="h-80 w-full select-none">
@@ -386,7 +394,14 @@ export function TrendsView() {
                         <ReferenceArea x1={dragStart} x2={dragEnd} strokeOpacity={0.3} fill="#6366f1" fillOpacity={0.15} />
                       )}
                       {!zoomRange && visiblePoints.length > 2 && (
-                        <Brush dataKey="recorded_at" height={22} stroke="#6366f1" />
+                        <Brush
+                          key={`${selectedCategory}-${mode}-${granularity}-${days}-${extendedPoints.length}`}
+                          dataKey="recorded_at"
+                          height={22}
+                          stroke="#6366f1"
+                          startIndex={defaultBrushStart}
+                          endIndex={Math.max(0, visiblePoints.length - 1)}
+                        />
                       )}
                     </LineChart>
                   </ResponsiveContainer>
