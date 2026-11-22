@@ -60,23 +60,44 @@ async def test_grocery_mcp_agent_executes_mcp_tool_with_gemini() -> None:
         analytics_tool = next(t.name for t in tools if "get_category_analytics" in t.name)
 
     fc = SimpleNamespace(name=analytics_tool, args={"mode": "comparison"})
+    usage_1 = SimpleNamespace(prompt_token_count=100, candidates_token_count=20, cached_content_token_count=0, thoughts_token_count=0, total_token_count=120)
+    usage_2 = SimpleNamespace(prompt_token_count=200, candidates_token_count=40, cached_content_token_count=50, thoughts_token_count=10, total_token_count=250)
     first_resp = SimpleNamespace(
         function_calls=[fc],
         candidates=[SimpleNamespace(content=MagicMock())],
         text=None,
+        usage_metadata=usage_1,
     )
     final_resp = SimpleNamespace(
         function_calls=[],
         candidates=[],
         text="In comparison mode, Rohlík averages 214.21 CZK and Košík 186.08 CZK.",
+        usage_metadata=usage_2,
     )
 
     mock_genai = MagicMock()
     mock_genai.aio.models.generate_content = AsyncMock(side_effect=[first_resp, final_resp])
 
+    mock_monitoring = MagicMock()
+    mock_span = MagicMock()
+    mock_monitoring.trace_observation.return_value.__enter__ = MagicMock(return_value=mock_span)
+    mock_monitoring.trace_observation.return_value.__exit__ = MagicMock(return_value=False)
+    mock_monitoring.trace_generation.return_value.__enter__ = MagicMock(return_value=mock_span)
+    mock_monitoring.trace_generation.return_value.__exit__ = MagicMock(return_value=False)
+
     with patch("app.a2a_agent.genai.Client", return_value=mock_genai):
-        agent = GroceryMCPAgent(mcp_target=mcp_server, api_key="test-key", model="gemini-3.5-flash")
-        answer = await agent.run("Compare category averages")
+        agent = GroceryMCPAgent(
+            mcp_target=mcp_server,
+            api_key="test-key",
+            model="gemini-3.5-flash",
+            monitoring=mock_monitoring,
+        )
+        answer = await agent.run("Compare category averages", context_id="ctx-test")
         assert "214.21" in answer
         assert mock_genai.aio.models.generate_content.call_count == 2
         assert mock_genai.aio.models.generate_content.call_args_list[0].kwargs["model"] == "gemini-3.5-flash"
+        assert mock_monitoring.trace_generation.call_count == 2
+        gen_updates = [c.kwargs for c in mock_span.update.call_args_list if "cost_details" in c.kwargs]
+        assert len(gen_updates) == 2
+        assert gen_updates[0]["usage_details"]["total"] == 120
+        assert gen_updates[1]["cost_details"]["total"] > 0

@@ -41,8 +41,35 @@ from google import genai
 from google.genai import types as genai_types
 
 from app.core.config import settings
+from app.services.monitoring import MonitoringService
 
 logger = logging.getLogger(__name__)
+
+# Per-1M-token USD pricing for explicit Langfuse cost_details tracking
+_GEMINI_PRICING_PER_1M: Dict[str, Dict[str, float]] = {
+    "gemini-3.5-flash": {"input": 0.30, "cached_input": 0.075, "output": 2.50},
+    "gemini-2.5-flash": {"input": 0.30, "cached_input": 0.075, "output": 2.50},
+    "gemini-2.0-flash": {"input": 0.10, "cached_input": 0.025, "output": 0.40},
+}
+
+
+def _compute_gemini_cost(
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+    cached_tokens: int = 0,
+    thoughts_tokens: int = 0,
+) -> Dict[str, float]:
+    """Calculate USD cost breakdown for a Gemini generation."""
+    rates = _GEMINI_PRICING_PER_1M.get(model, _GEMINI_PRICING_PER_1M["gemini-3.5-flash"])
+    billable_input = max(0, input_tokens - cached_tokens)
+    in_cost = (billable_input * rates["input"] + cached_tokens * rates["cached_input"]) / 1_000_000.0
+    out_cost = ((output_tokens + thoughts_tokens) * rates["output"]) / 1_000_000.0
+    return {
+        "input": round(in_cost, 8),
+        "output": round(out_cost, 8),
+        "total": round(in_cost + out_cost, 8),
+    }
 
 SYSTEM_INSTRUCTION = (
     "You are the Grocery Planner AI assistant for Prague supermarkets (Rohlík.cz and Košík.cz), "
@@ -74,28 +101,62 @@ class GroceryMCPAgent:
         mcp_target: Union[FastMCP, str],
         api_key: Optional[str] = None,
         model: Optional[str] = None,
+        monitoring: Optional[MonitoringService] = None,
     ) -> None:
         self.mcp_target = mcp_target
         self.api_key = api_key or settings.gemini_api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         self.model = model or settings.gemini_model
+        self.monitoring = monitoring or MonitoringService()
 
     def _build_mcp_client(self) -> Client:
         if isinstance(self.mcp_target, str):
             return Client(StreamableHttpTransport(url=self.mcp_target))
         return Client(self.mcp_target)
 
-    async def run(self, user_message: str) -> str:
-        """Run a multi-turn Gemini 3.5 Flash tool-calling loop over FastMCP tools."""
+    async def run(self, user_message: str, context_id: Optional[str] = None) -> str:
+        """Run a multi-turn Gemini 3.5 Flash tool-calling loop over FastMCP tools with Langfuse tracing."""
         if not self.api_key:
             return (
                 "Gemini API key is not configured. Please set `GEMINI_API_KEY` in your `.env` "
                 "file and restart the server to chat with Gemini 3.5 Flash."
             )
 
+        with self.monitoring.trace_observation(
+            name="a2a-grocery-agent",
+            as_type="agent",
+            input_data={"message": user_message},
+            metadata={"model": self.model, "protocol": "a2a-1.0", "context_id": context_id},
+            flush_on_exit=True,
+        ) as root_span:
+            reply, stats = await self._run_loop(user_message)
+            if root_span is not None:
+                root_span.update(
+                    output={"reply": reply},
+                    metadata={
+                        "model": self.model,
+                        "turns": stats["turns"],
+                        "tool_calls": stats["tool_calls"],
+                        "total_input_tokens": stats["input_tokens"],
+                        "total_output_tokens": stats["output_tokens"],
+                        "total_cost_usd": round(stats["cost_usd"], 8),
+                    },
+                )
+            return reply
+
+    async def _run_loop(self, user_message: str) -> tuple[str, Dict[str, Any]]:
         genai_client = genai.Client(api_key=self.api_key)
+        stats: Dict[str, Any] = {"turns": 0, "tool_calls": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
 
         async with self._build_mcp_client() as mcp_client:
-            mcp_tools = await mcp_client.list_tools()
+            with self.monitoring.trace_observation(
+                name="mcp-list-tools",
+                as_type="retriever",
+                input_data={"target": str(type(self.mcp_target).__name__)},
+            ) as tools_span:
+                mcp_tools = await mcp_client.list_tools()
+                if tools_span is not None:
+                    tools_span.update(output={"tool_count": len(mcp_tools), "tools": [t.name for t in mcp_tools]})
+
             declarations = [
                 genai_types.FunctionDeclaration(
                     name=t.name,
@@ -117,14 +178,55 @@ class GroceryMCPAgent:
                 )
             ]
 
-            for _ in range(6):
-                response = await genai_client.aio.models.generate_content(
+            for turn in range(6):
+                stats["turns"] = turn + 1
+                with self.monitoring.trace_generation(
+                    name=f"gemini-turn-{turn + 1}",
                     model=self.model,
-                    contents=contents,
-                    config=tool_config,
-                )
+                    input_data={"turn": turn + 1, "message_count": len(contents), "user_message": user_message if turn == 0 else None},
+                    model_parameters={"temperature": 0.2},
+                ) as gen_span:
+                    response = await genai_client.aio.models.generate_content(
+                        model=self.model,
+                        contents=contents,
+                        config=tool_config,
+                    )
+
+                    usage_meta = getattr(response, "usage_metadata", None)
+                    in_tok = int(getattr(usage_meta, "prompt_token_count", 0) or 0)
+                    out_tok = int(getattr(usage_meta, "candidates_token_count", 0) or 0)
+                    cached_tok = int(getattr(usage_meta, "cached_content_token_count", 0) or 0)
+                    thought_tok = int(getattr(usage_meta, "thoughts_token_count", 0) or 0)
+                    tot_tok = int(getattr(usage_meta, "total_token_count", 0) or (in_tok + out_tok + thought_tok))
+                    cost_details = _compute_gemini_cost(self.model, in_tok, out_tok, cached_tok, thought_tok)
+
+                    stats["input_tokens"] += in_tok
+                    stats["output_tokens"] += out_tok + thought_tok
+                    stats["cost_usd"] += cost_details["total"]
+
+                    if gen_span is not None:
+                        usage_details: Dict[str, int] = {
+                            "input": in_tok,
+                            "output": out_tok,
+                            "total": tot_tok,
+                        }
+                        if cached_tok:
+                            usage_details["input_cache_read"] = cached_tok
+                        if thought_tok:
+                            usage_details["output_reasoning"] = thought_tok
+
+                        fc_out = [
+                            {"name": fc.name, "args": dict(fc.args) if fc.args else {}}
+                            for fc in (response.function_calls or [])
+                        ]
+                        gen_span.update(
+                            output={"text": response.text, "function_calls": fc_out} if fc_out else (response.text or ""),
+                            usage_details=usage_details,
+                            cost_details=cost_details,
+                        )
+
                 if not response.function_calls:
-                    return response.text or "I couldn't generate a response."
+                    return (response.text or "I couldn't generate a response."), stats
 
                 # Append model turn with function calls
                 if response.candidates and response.candidates[0].content:
@@ -133,22 +235,33 @@ class GroceryMCPAgent:
                 # Execute every requested MCP tool via FastMCP Client
                 tool_parts: List[genai_types.Part] = []
                 for fc in response.function_calls:
+                    stats["tool_calls"] += 1
                     tool_name = fc.name or ""
                     tool_args = dict(fc.args) if fc.args else {}
-                    try:
-                        mcp_result = await mcp_client.call_tool(tool_name, tool_args)
-                        text_chunks = [
-                            getattr(c, "text", str(c))
-                            for c in (mcp_result.content or [])
-                        ]
-                        raw_output = "\n".join(text_chunks) if text_chunks else "{}"
+                    with self.monitoring.trace_observation(
+                        name=f"mcp-tool:{tool_name}",
+                        as_type="tool",
+                        input_data=tool_args,
+                        metadata={"tool_name": tool_name},
+                    ) as tool_span:
                         try:
-                            parsed_output: Any = json.loads(raw_output)
-                        except json.JSONDecodeError:
-                            parsed_output = {"result": raw_output}
-                    except Exception as exc:
-                        logger.warning("MCP tool '%s' failed: %s", tool_name, exc)
-                        parsed_output = {"error": str(exc)}
+                            mcp_result = await mcp_client.call_tool(tool_name, tool_args)
+                            text_chunks = [
+                                getattr(c, "text", str(c))
+                                for c in (mcp_result.content or [])
+                            ]
+                            raw_output = "\n".join(text_chunks) if text_chunks else "{}"
+                            try:
+                                parsed_output: Any = json.loads(raw_output)
+                            except json.JSONDecodeError:
+                                parsed_output = {"result": raw_output}
+                            if tool_span is not None:
+                                tool_span.update(output=parsed_output)
+                        except Exception as exc:
+                            logger.warning("MCP tool '%s' failed: %s", tool_name, exc)
+                            parsed_output = {"error": str(exc)}
+                            if tool_span is not None:
+                                tool_span.update(level="ERROR", status_message=str(exc), output=parsed_output)
 
                     tool_parts.append(
                         genai_types.Part.from_function_response(
@@ -159,7 +272,7 @@ class GroceryMCPAgent:
 
                 contents.append(genai_types.Content(role="user", parts=tool_parts))
 
-            return "Reached maximum tool-calling steps without a final answer."
+            return "Reached maximum tool-calling steps without a final answer.", stats
 
 
 class GroceryA2AExecutor(AgentExecutor):
@@ -188,7 +301,7 @@ class GroceryA2AExecutor(AgentExecutor):
         await updater.start_work()
         try:
             user_text = context.get_user_input() or ""
-            reply = await self.agent.run(user_text)
+            reply = await self.agent.run(user_text, context_id=context_id)
             msg = updater.new_agent_message([Part(text=reply)])
             await updater.complete(msg)
         except Exception as exc:
@@ -243,9 +356,11 @@ def mount_a2a_agent(
     base_url: Optional[str] = None,
 ) -> AgentCard:
     """Register A2A AgentCard, JSON-RPC, and REST routes on the FastAPI app."""
+    from app.api.deps import get_monitoring_service
+
     resolved_base = base_url or f"http://localhost:{settings.app_port}"
     agent_card = create_agent_card(base_url=resolved_base)
-    agent = GroceryMCPAgent(mcp_target=mcp_target)
+    agent = GroceryMCPAgent(mcp_target=mcp_target, monitoring=get_monitoring_service())
     executor = GroceryA2AExecutor(agent=agent)
     request_handler = DefaultRequestHandler(
         agent_executor=executor,
