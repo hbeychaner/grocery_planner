@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { ExternalLink, Search } from "lucide-react";
+import { useLang } from "../i18n";
 
 interface ProductItem {
   product_id: string;
@@ -45,6 +46,7 @@ interface ComparisonData {
 const STAPLES = ["butter", "whole milk", "eggs", "pilsner urquell", "bananas"];
 
 export function CompareView() {
+  const { lang, t } = useLang();
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -60,7 +62,7 @@ export function CompareView() {
 
     try {
       const [compResp, kupiResp] = await Promise.all([
-        fetch(`/api/v1/compare?q=${encodeURIComponent(clean)}&lang=en`),
+        fetch(`/api/v1/compare?q=${encodeURIComponent(clean)}&lang=${lang}`),
         fetch(`/api/v1/compare/kupi?q=${encodeURIComponent(clean)}`).catch(() => null),
       ]);
       if (!compResp.ok) {
@@ -114,7 +116,10 @@ export function CompareView() {
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search any grocery item (e.g., 'butter', 'whole milk', 'blueberries')..."
+              placeholder={t(
+                "Search any grocery item (e.g., 'butter', 'whole milk', 'blueberries')...",
+                "Vyhledejte potravinu (např. 'máslo', 'plnotučné mléko', 'borůvky')..."
+              )}
               required
               className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
@@ -124,12 +129,12 @@ export function CompareView() {
             disabled={loading}
             className="px-5 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 transition cursor-pointer"
           >
-            {loading ? "Searching..." : "Compare"}
+            {loading ? t("Searching...", "Hledám...") : t("Compare", "Porovnat")}
           </button>
         </form>
 
         <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="text-slate-500 font-medium">Quick staples:</span>
+          <span className="text-slate-500 font-medium">{t("Quick staples:", "Rychlé položky:")}</span>
           {STAPLES.map((item) => (
             <button
               key={item}
@@ -156,9 +161,12 @@ export function CompareView() {
             Number(comparison.price_difference) > 0 && (
               <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
                 <strong>
-                  {comparison.advantage === "rohlik_cheaper" ? "Rohlík is cheaper." : "Košík is cheaper."}
+                  {comparison.advantage === "rohlik_cheaper"
+                    ? t("Rohlík is cheaper.", "Rohlík je levnější.")
+                    : t("Košík is cheaper.", "Košík je levnější.")}
                 </strong>{" "}
-                Save {comparison.price_difference} CZK per {unitLabel === "pcs" ? "piece" : unitLabel} (
+                {t("Save", "Ušetříte")} {comparison.price_difference}{" "}
+                {t("CZK per", "Kč za")} {unitLabel === "pcs" ? t("piece", "kus") : unitLabel} (
                 {comparison.percentage_savings}%).
               </div>
             )}
@@ -236,6 +244,7 @@ function StoreColumn({
   accent: string;
   products: ProductItem[];
 }) {
+  const { t } = useLang();
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs space-y-3">
       <div className={`text-sm font-bold ${accent}`}>{title}</div>
@@ -263,7 +272,7 @@ function StoreColumn({
                 <div className="flex flex-wrap gap-1.5 mb-1">
                   {idx === 0 && (
                     <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-800">
-                      Best Value
+                      {t("Best Value", "Nejlepší cena")}
                     </span>
                   )}
                   {p.is_on_sale && (

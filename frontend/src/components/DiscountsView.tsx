@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { Clock, ExternalLink, RefreshCw, Search, Tag } from "lucide-react";
+import { useLang, type AppLang } from "../i18n";
 
 interface ProductSale {
   sale_type: string;
@@ -55,31 +56,50 @@ function parseTimestamp(ts?: string | null): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-function formatCountdown(endsAt?: string | null): { label: string; urgent: boolean } {
+function formatCountdown(
+  endsAt: string | null | undefined,
+  lang: AppLang,
+  t: (en: string, cs: string) => string
+): { label: string; urgent: boolean } {
   const end = parseTimestamp(endsAt);
   if (!end) {
-    return { label: "Ongoing / No end date", urgent: false };
+    return { label: t("Ongoing / No end date", "Bez data ukončení"), urgent: false };
   }
   const diffMs = end.getTime() - Date.now();
   if (diffMs <= 0) {
-    return { label: "Ending today", urgent: true };
+    return { label: t("Ending today", "Končí dnes"), urgent: true };
   }
   const totalHours = Math.floor(diffMs / (1000 * 60 * 60));
   const days = Math.floor(totalHours / 24);
   const hours = totalHours % 24;
-  const dateStr = end.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const dateStr = end.toLocaleDateString(lang === "cs" ? "cs-CZ" : "en-US", {
+    month: "short",
+    day: "numeric",
+  });
   if (days >= 1) {
-    return { label: `Ends in ${days}d ${hours}h (${dateStr})`, urgent: days <= 2 };
+    return {
+      label:
+        lang === "cs"
+          ? `Končí za ${days}d ${hours}h (${dateStr})`
+          : `Ends in ${days}d ${hours}h (${dateStr})`,
+      urgent: days <= 2,
+    };
   }
   const mins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
-  return { label: `Ends in ${hours}h ${mins}m`, urgent: true };
+  return {
+    label: lang === "cs" ? `Končí za ${hours}h ${mins}m` : `Ends in ${hours}h ${mins}m`,
+    urgent: true,
+  };
 }
 
-function saleTypeLabel(sale: ProductSale): string {
-  const t = sale.sale_type.toLowerCase();
-  if (t === "expiration") return "Near-Expiry";
-  if (t === "premium") return sale.welcome_price ? "Xtra / For You" : "Xtra";
-  if (t === "sale" || t === "action") return "Promo Sale";
+function saleTypeLabel(sale: ProductSale, t: (en: string, cs: string) => string): string {
+  const tNorm = sale.sale_type.toLowerCase();
+  if (tNorm === "expiration") return t("Near-Expiry", "Blízká expirace");
+  if (tNorm === "premium") return sale.welcome_price ? t("Xtra / For You", "Xtra / Pro vás") : "Xtra";
+  if (tNorm === "longtermaction") return t("Long-Term Sale", "Dlouhodobá akce");
+  if (tNorm === "shorttermaction") return t("Short-Term Sale", "Krátkodobá akce");
+  if (tNorm === "multipack") return t("Multipack Deal", "Výhodné balení");
+  if (tNorm === "sale" || tNorm === "action") return t("Sale", "Akce");
   return sale.sale_type;
 }
 
@@ -91,6 +111,7 @@ function saleBadgeStyle(sale: ProductSale): string {
 }
 
 export function DiscountsView() {
+  const { lang, t } = useLang();
   const [query, setQuery] = useState("");
   const [activeQuery, setActiveQuery] = useState("");
   const [storeFilter, setStoreFilter] = useState<"all" | "rohlik" | "kosik">("all");
@@ -202,10 +223,13 @@ export function DiscountsView() {
           <div>
             <h1 className="text-lg font-bold text-slate-900 flex items-center gap-2">
               <Tag className="w-5 h-5 text-indigo-600" />
-              <span>Live Discount Tracker</span>
+              <span>{t("Live Discount Tracker", "Sledování slev a akcí")}</span>
             </h1>
             <p className="text-xs text-slate-500 mt-0.5">
-              Tracks active promos, Xtra / For-You discounts, and near-expiry markdowns with end dates and remaining stock.
+              {t(
+                "Tracks active sales, Xtra / For-You discounts, and near-expiry markdowns with end dates and remaining stock.",
+                "Sleduje aktivní akce, Xtra / Pro vás slevy a zlevněné položky před expirací včetně konce platnosti a skladových zásob."
+              )}
             </p>
           </div>
           <button
@@ -215,7 +239,11 @@ export function DiscountsView() {
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 cursor-pointer"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
-            <span>{loading ? "Scanning..." : "Refresh Live"}</span>
+            <span>
+              {loading
+                ? t("Scanning...", "Hledám...")
+                : t("Refresh Live", "Obnovit živě")}
+            </span>
           </button>
         </div>
 
@@ -226,7 +254,10 @@ export function DiscountsView() {
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Scan discounts for a specific product (e.g., 'butter', 'máslo', 'pilsner') or leave blank for watchlist..."
+              placeholder={t(
+                "Scan discounts for a specific product (e.g., 'butter', 'máslo', 'pilsner') or leave blank for watchlist...",
+                "Hledat slevy pro konkrétní produkt (např. 'máslo', 'mléko', 'pilsner') nebo nechat prázdné pro sledované položky..."
+              )}
               className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>
@@ -235,7 +266,7 @@ export function DiscountsView() {
             disabled={loading}
             className="px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 transition cursor-pointer"
           >
-            Scan
+            {t("Scan", "Hledat")}
           </button>
           {activeQuery && (
             <button
@@ -243,7 +274,7 @@ export function DiscountsView() {
               onClick={handleClearSearch}
               className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-sm font-medium hover:bg-slate-50 cursor-pointer"
             >
-              Watchlist
+              {t("Watchlist", "Sledované")}
             </button>
           )}
         </form>
@@ -261,7 +292,7 @@ export function DiscountsView() {
                     storeFilter === s ? "bg-white text-slate-900 shadow-2xs" : "text-slate-600"
                   }`}
                 >
-                  {s === "all" ? "All Stores" : s === "rohlik" ? "Rohlík" : "Košík"}
+                  {s === "all" ? t("All Stores", "Všechny obchody") : s === "rohlik" ? "Rohlík" : "Košík"}
                 </button>
               ))}
             </div>
@@ -269,20 +300,20 @@ export function DiscountsView() {
             <div className="inline-flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
               {(
                 [
-                  { id: "all", label: "All Types" },
-                  { id: "promo", label: "Promo & Xtra" },
-                  { id: "expiration", label: "Near-Expiry" },
+                  { id: "all", label: t("All Types", "Všechny typy") },
+                  { id: "promo", label: t("Sales & Xtra", "Akce a Xtra") },
+                  { id: "expiration", label: t("Near-Expiry", "Blízká expirace") },
                 ] as const
-              ).map((t) => (
+              ).map((tOpt) => (
                 <button
-                  key={t.id}
+                  key={tOpt.id}
                   type="button"
-                  onClick={() => setTypeFilter(t.id)}
+                  onClick={() => setTypeFilter(tOpt.id)}
                   className={`px-2.5 py-1 rounded-md font-medium cursor-pointer ${
-                    typeFilter === t.id ? "bg-white text-slate-900 shadow-2xs" : "text-slate-600"
+                    typeFilter === tOpt.id ? "bg-white text-slate-900 shadow-2xs" : "text-slate-600"
                   }`}
                 >
-                  {t.label}
+                  {tOpt.label}
                 </button>
               ))}
             </div>
@@ -294,20 +325,20 @@ export function DiscountsView() {
                 onChange={(e) => handleToggleExpiration(e.target.checked)}
                 className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
               />
-              <span>Include Near-Expiry</span>
+              <span>{t("Include Near-Expiry", "Včetně blízké expirace")}</span>
             </label>
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-slate-500">Sort:</span>
+            <span className="text-slate-500">{t("Sort:", "Řadit:")}</span>
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as "discount" | "ending" | "price")}
               className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
             >
-              <option value="discount">Biggest % Off</option>
-              <option value="ending">Ending Soonest</option>
-              <option value="price">Lowest Price</option>
+              <option value="discount">{t("Biggest % Off", "Největší sleva %")}</option>
+              <option value="ending">{t("Ending Soonest", "Končí nejdříve")}</option>
+              <option value="price">{t("Lowest Price", "Nejnižší cena")}</option>
             </select>
           </div>
         </div>
@@ -317,30 +348,33 @@ export function DiscountsView() {
       {data && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="rounded-xl border border-slate-200 bg-white p-3.5">
-            <div className="text-[11px] text-slate-500 font-medium">Active Discounts</div>
+            <div className="text-[11px] text-slate-500 font-medium">{t("Active Discounts", "Aktivní slevy")}</div>
             <div className="text-xl font-bold text-slate-900 mt-0.5">{stats.count}</div>
             <div className="text-[11px] text-slate-400">
-              Across {data.scanned_queries} {activeQuery ? "query" : "watchlist items"}
+              {t(
+                `Across ${data.scanned_queries} ${activeQuery ? "query" : "watchlist items"}`,
+                `Napříč ${data.scanned_queries} ${activeQuery ? "dotazem" : "sledovanými položkami"}`
+              )}
             </div>
           </div>
           <div className="rounded-xl border border-slate-200 bg-white p-3.5">
-            <div className="text-[11px] text-slate-500 font-medium">Top Discount</div>
+            <div className="text-[11px] text-slate-500 font-medium">{t("Top Discount", "Nejvyšší sleva")}</div>
             <div className="text-xl font-bold text-emerald-700 mt-0.5">
               {stats.maxPct > 0 ? `-${stats.maxPct}%` : "—"}
             </div>
-            <div className="text-[11px] text-slate-400">Best markdown found</div>
+            <div className="text-[11px] text-slate-400">{t("Best markdown found", "Nejvýhodnější akce")}</div>
           </div>
           <div className="rounded-xl border border-slate-200 bg-white p-3.5">
-            <div className="text-[11px] text-slate-500 font-medium">Average Savings</div>
+            <div className="text-[11px] text-slate-500 font-medium">{t("Average Savings", "Průměrná sleva")}</div>
             <div className="text-xl font-bold text-indigo-700 mt-0.5">
               {stats.avgPct > 0 ? `-${stats.avgPct}%` : "—"}
             </div>
-            <div className="text-[11px] text-slate-400">Across filtered deals</div>
+            <div className="text-[11px] text-slate-400">{t("Across filtered deals", "Z vyfiltrovaných položek")}</div>
           </div>
           <div className="rounded-xl border border-slate-200 bg-white p-3.5">
-            <div className="text-[11px] text-slate-500 font-medium">Ending ≤ 48h</div>
+            <div className="text-[11px] text-slate-500 font-medium">{t("Ending ≤ 48h", "Končí do 48 h")}</div>
             <div className="text-xl font-bold text-amber-700 mt-0.5">{stats.endingSoon}</div>
-            <div className="text-[11px] text-slate-400">Time-sensitive deals</div>
+            <div className="text-[11px] text-slate-400">{t("Time-sensitive deals", "Časově omezené akce")}</div>
           </div>
         </div>
       )}
@@ -380,7 +414,7 @@ export function DiscountsView() {
               : p.unit_price
               ? Number(p.unit_price)
               : null;
-            const countdown = formatCountdown(best?.ends_at);
+            const countdown = formatCountdown(best?.ends_at, lang, t);
 
             return (
               <div
@@ -415,7 +449,7 @@ export function DiscountsView() {
                         className={`text-[10px] font-semibold px-2 py-0.5 rounded-md border ${saleBadgeStyle(s)}`}
                       >
                         {s.discount_percentage ? `-${s.discount_percentage}% ` : ""}
-                        {saleTypeLabel(s)}
+                        {saleTypeLabel(s, t)}
                       </span>
                     ))}
                   </div>
@@ -437,7 +471,7 @@ export function DiscountsView() {
                     </span>
                     {best?.remaining != null && (
                       <span className="text-slate-500 font-medium">
-                        {best.remaining} left
+                        {lang === "cs" ? `Zbývá ${best.remaining} ks` : `${best.remaining} left`}
                       </span>
                     )}
                   </div>
@@ -466,7 +500,7 @@ export function DiscountsView() {
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-800 shrink-0"
                       >
-                        <span>Open</span>
+                        <span>{t("Open", "Otevřít")}</span>
                         <ExternalLink className="w-3 h-3" />
                       </a>
                     )}

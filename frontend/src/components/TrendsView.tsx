@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useLang } from "../i18n";
 import {
   Brush,
   CartesianGrid,
@@ -45,6 +46,7 @@ interface TrackedItem {
 }
 
 export function TrendsView() {
+  const { t } = useLang();
   const [mode, setMode] = useState<"comparison" | "generic">("comparison");
   const [normalizeByIncome, setNormalizeByIncome] = useState(false);
   const [rebaseIndex, setRebaseIndex] = useState(false);
@@ -324,18 +326,18 @@ export function TrendsView() {
                 onChange={(e) => setGranularity(e.target.value as "daily" | "monthly")}
                 className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white"
               >
-                <option value="daily">Daily</option>
-                <option value="monthly">Monthly</option>
+                <option value="daily">{t("Daily", "Denně")}</option>
+                <option value="monthly">{t("Monthly", "Měsíčně")}</option>
               </select>
               <select
                 value={days}
                 onChange={(e) => setDays(e.target.value)}
                 className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white"
               >
-                <option value="90">Last 3 months</option>
-                <option value="365">Last 12 months</option>
-                <option value="730">Last 24 months</option>
-                <option value="3650">All time</option>
+                <option value="90">{t("Last 3 months", "Poslední 3 měsíce")}</option>
+                <option value="365">{t("Last 12 months", "Posledních 12 měsíců")}</option>
+                <option value="730">{t("Last 24 months", "Posledních 24 měsíců")}</option>
+                <option value="3650">{t("All time", "Celá historie")}</option>
               </select>
             </div>
           </div>

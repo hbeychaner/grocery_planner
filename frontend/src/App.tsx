@@ -6,10 +6,20 @@ import { CompareView } from "./components/CompareView";
 import { DiscountsView } from "./components/DiscountsView";
 import { TrendsView } from "./components/TrendsView";
 import { WelcomeAuth } from "./components/WelcomeAuth";
+import { LanguageProvider, useLang } from "./i18n";
 
 type AppTab = "compare" | "discounts" | "trends";
 
 export function App() {
+  return (
+    <LanguageProvider>
+      <AppShell />
+    </LanguageProvider>
+  );
+}
+
+function AppShell() {
+  const { lang, setLang, t } = useLang();
   const [auth, setAuth] = useState<AuthStatus | null>(null);
   const [tab, setTab] = useState<AppTab>(() => {
     if (window.location.pathname === "/trends") return "trends";
@@ -59,7 +69,9 @@ export function App() {
           <div className="flex items-center gap-6">
             <div>
               <span className="text-base font-bold text-slate-900">Grocery Planner</span>
-              <span className="ml-2 text-xs text-slate-500">Prague (Rohlík vs. Košík)</span>
+              <span className="ml-2 text-xs text-slate-500">
+                {t("Prague (Rohlík vs. Košík)", "Praha (Rohlík vs. Košík)")}
+              </span>
             </div>
             <nav className="inline-flex rounded-lg border border-slate-200 p-0.5 bg-slate-50 text-xs">
               <button
@@ -69,7 +81,7 @@ export function App() {
                   tab === "compare" ? "bg-indigo-600 text-white" : "text-slate-600 hover:text-slate-900"
                 }`}
               >
-                Compare
+                {t("Compare", "Porovnat")}
               </button>
               <button
                 type="button"
@@ -78,7 +90,7 @@ export function App() {
                   tab === "discounts" ? "bg-indigo-600 text-white" : "text-slate-600 hover:text-slate-900"
                 }`}
               >
-                Discounts
+                {t("Discounts", "Slevy a akce")}
               </button>
               <button
                 type="button"
@@ -87,12 +99,32 @@ export function App() {
                   tab === "trends" ? "bg-indigo-600 text-white" : "text-slate-600 hover:text-slate-900"
                 }`}
               >
-                Price Trends
+                {t("Price Trends", "Vývoj cen")}
               </button>
             </nav>
           </div>
 
           <div className="flex items-center gap-3 text-xs">
+            <div className="inline-flex rounded-lg border border-slate-200 p-0.5 bg-slate-50" role="group" aria-label="Language">
+              <button
+                type="button"
+                onClick={() => setLang("en")}
+                className={`px-2 py-1 rounded-md font-semibold cursor-pointer ${
+                  lang === "en" ? "bg-white text-slate-900 shadow-2xs" : "text-slate-500 hover:text-slate-900"
+                }`}
+              >
+                EN
+              </button>
+              <button
+                type="button"
+                onClick={() => setLang("cs")}
+                className={`px-2 py-1 rounded-md font-semibold cursor-pointer ${
+                  lang === "cs" ? "bg-white text-slate-900 shadow-2xs" : "text-slate-500 hover:text-slate-900"
+                }`}
+              >
+                CS
+              </button>
+            </div>
             <a
               href="/docs"
               target="_blank"
@@ -110,7 +142,7 @@ export function App() {
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer"
             >
               <LogOut className="w-3.5 h-3.5" />
-              <span>Sign Out</span>
+              <span>{t("Sign Out", "Odhlásit se")}</span>
             </button>
           </div>
         </div>
