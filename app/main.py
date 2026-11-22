@@ -252,6 +252,15 @@ async def serve_terms() -> FileResponse:
     return FileResponse(spa_index if spa_index.exists() else (static_dir / "index.html"))
 
 
+@app.get("/google022e61de43f19a57.html", include_in_schema=False)
+async def serve_google_verification() -> Response:
+    """Serve Google Search Console site verification file."""
+    return Response(
+        content="google-site-verification: google022e61de43f19a57.html",
+        media_type="text/html",
+    )
+
+
 @app.get("/health", tags=["Health"])
 async def health_check() -> Dict[str, object]:
     """Service health check verifying stores and optional Ollama reachability."""
