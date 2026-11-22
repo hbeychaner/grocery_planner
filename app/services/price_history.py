@@ -332,6 +332,8 @@ class PriceHistoryService:
         self, query: str, category: Optional[str] = None
     ) -> List[TrackedItem]:
         """Rank tracked items by accent-insensitive lexical match + multilingual semantic similarity."""
+        from app.services.matcher import ProductMatchingService
+
         items = self.list_tracked_items(active_only=True)
         if category and category != "overall":
             items = [it for it in items if (it.category or "other") == category]
