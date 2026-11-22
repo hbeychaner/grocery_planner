@@ -615,13 +615,17 @@ code {
   width: 380px;
   flex-shrink: 0;
   position: sticky;
-  top: 0;
-  height: 100vh;
+  top: 16px;
+  height: min(620px, calc(100vh - 32px));
+  max-height: calc(100vh - 32px);
+  margin: 16px 16px 16px 0;
   background: #ffffff;
-  border-left: 1px solid #e2e8f0;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  box-shadow: -4px 0 18px rgba(15, 23, 42, 0.04);
+  box-shadow: 0 4px 18px rgba(15, 23, 42, 0.06);
 }
 
 .chat-header {
