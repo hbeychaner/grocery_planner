@@ -151,7 +151,7 @@ export function WelcomeAuth({ googleOAuthEnabled, onAuthenticated }: WelcomeAuth
               </button>
             </form>
 
-            <div className="pt-2 border-t border-slate-100 text-center">
+            <div className="pt-2 border-t border-slate-100 text-center space-y-2">
               <button
                 type="button"
                 onClick={() => {
@@ -162,6 +162,15 @@ export function WelcomeAuth({ googleOAuthEnabled, onAuthenticated }: WelcomeAuth
               >
                 {isRegister ? "Already have an account? Sign in" : "Need an account? Create one"}
               </button>
+              <div className="flex items-center justify-center gap-3 text-[11px] text-slate-400">
+                <a href="/privacy" className="hover:text-slate-700 underline">
+                  Privacy Policy
+                </a>
+                <span>&bull;</span>
+                <a href="/terms" className="hover:text-slate-700 underline">
+                  Terms of Use
+                </a>
+              </div>
             </div>
           </div>
         </div>

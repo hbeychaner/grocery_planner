@@ -63,7 +63,6 @@ export function TrendsView() {
   const [items, setItems] = useState<TrackedItem[]>([]);
   const [rankedItems, setRankedItems] = useState<TrackedItem[] | null>(null);
   const [filterText, setFilterText] = useState("");
-  const [statusMsg, setStatusMsg] = useState<string | null>(null);
 
   function stripAccents(str: string): string {
     return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
@@ -125,21 +124,6 @@ export function TrendsView() {
     return () => clearTimeout(timer);
   }, [filterText, selectedCategory]);
 
-  async function triggerAction(endpoint: string, label: string) {
-    setStatusMsg(`Running ${label}...`);
-    try {
-      const resp = await fetch(endpoint, { method: "POST" });
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        throw new Error(err.detail || `${label} failed`);
-      }
-      setStatusMsg(`${label} completed.`);
-      await loadDashboard();
-    } catch (err) {
-      setStatusMsg(err instanceof Error ? err.message : `${label} failed`);
-    }
-  }
-
   const activeMeta = categories.find((c) => c.category === selectedCategory) || categories[0];
   const fmtVal = (v: number | null | undefined) =>
     v !== null && v !== undefined
@@ -188,36 +172,7 @@ export function TrendsView() {
             <div className="text-sm font-semibold text-slate-700 mt-1">{stats.last_recorded_at || "—"}</div>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2 text-xs">
-          <button
-            type="button"
-            onClick={() => triggerAction("/api/v1/history/ingest-csu", "ČSÚ Sync")}
-            className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 font-medium cursor-pointer"
-          >
-            Sync ČSÚ
-          </button>
-          <button
-            type="button"
-            onClick={() => triggerAction("/api/v1/history/ingest-bls", "US BLS Sync")}
-            className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 font-medium cursor-pointer"
-          >
-            Sync US (BLS)
-          </button>
-          <button
-            type="button"
-            onClick={() => triggerAction("/api/v1/history/run?limit=10", "Price Check (10)")}
-            className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 font-medium cursor-pointer"
-          >
-            Run Check (10)
-          </button>
-        </div>
       </div>
-
-      {statusMsg && (
-        <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2 text-xs text-indigo-800">
-          {statusMsg}
-        </div>
-      )}
 
       {/* Main Analytics Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">

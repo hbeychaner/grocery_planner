@@ -4,11 +4,13 @@ import { fetchAuthStatus, logoutUser, type AuthStatus } from "./api";
 import { ChatSidebar } from "./components/ChatSidebar";
 import { CompareView } from "./components/CompareView";
 import { DiscountsView } from "./components/DiscountsView";
+import { LegalPages } from "./components/LegalPages";
 import { TrendsView } from "./components/TrendsView";
 import { WelcomeAuth } from "./components/WelcomeAuth";
 import { LanguageProvider, useLang } from "./i18n";
 
 type AppTab = "compare" | "discounts" | "trends";
+type LegalRoute = "privacy" | "terms" | null;
 
 export function App() {
   return (
@@ -18,9 +20,18 @@ export function App() {
   );
 }
 
+function getLegalRoute(pathname: string): LegalRoute {
+  if (pathname === "/privacy") return "privacy";
+  if (pathname === "/terms") return "terms";
+  return null;
+}
+
 function AppShell() {
   const { lang, setLang, t } = useLang();
   const [auth, setAuth] = useState<AuthStatus | null>(null);
+  const [legalRoute, setLegalRoute] = useState<LegalRoute>(() =>
+    getLegalRoute(window.location.pathname)
+  );
   const [tab, setTab] = useState<AppTab>(() => {
     if (window.location.pathname === "/trends") return "trends";
     if (window.location.pathname === "/discounts") return "discounts";
@@ -29,9 +40,26 @@ function AppShell() {
 
   useEffect(() => {
     fetchAuthStatus().then(setAuth);
+    const onPopState = () => {
+      setLegalRoute(getLegalRoute(window.location.pathname));
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
   }, []);
 
+  function navigateTo(path: string) {
+    window.history.pushState({}, "", path);
+    const legal = getLegalRoute(path);
+    setLegalRoute(legal);
+    if (!legal) {
+      if (path === "/trends") setTab("trends");
+      else if (path === "/discounts") setTab("discounts");
+      else setTab("compare");
+    }
+  }
+
   function switchTab(next: AppTab) {
+    setLegalRoute(null);
     setTab(next);
     const path = next === "trends" ? "/trends" : next === "discounts" ? "/discounts" : "/";
     window.history.pushState({}, "", path);
@@ -42,6 +70,10 @@ function AppShell() {
     setAuth((prev) =>
       prev ? { ...prev, authenticated: false, user: null } : { authenticated: false, user: null, google_oauth_enabled: false }
     );
+  }
+
+  if (legalRoute) {
+    return <LegalPages page={legalRoute} onNavigate={navigateTo} />;
   }
 
   if (auth === null) {
@@ -161,6 +193,34 @@ function AppShell() {
         </main>
         <ChatSidebar />
       </div>
+
+      <footer className="border-t border-slate-200 bg-white px-6 py-3 text-xs text-slate-500">
+        <div className="max-w-[1440px] mx-auto flex flex-wrap items-center justify-between gap-3">
+          <span>Grocery Planner</span>
+          <div className="flex items-center gap-4">
+            <a
+              href="/privacy"
+              onClick={(e) => {
+                e.preventDefault();
+                navigateTo("/privacy");
+              }}
+              className="hover:text-slate-900 underline"
+            >
+              {t("Privacy Policy", "Zásady ochrany osobních údajů")}
+            </a>
+            <a
+              href="/terms"
+              onClick={(e) => {
+                e.preventDefault();
+                navigateTo("/terms");
+              }}
+              className="hover:text-slate-900 underline"
+            >
+              {t("Terms of Use", "Podmínky použití")}
+            </a>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }

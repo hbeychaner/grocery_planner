@@ -187,7 +187,7 @@ async def security_and_cache_middleware(request: Request, call_next: Any) -> Res
         "frame-ancestors 'none'"
     )
 
-    if path.startswith("/static") or path in ("/", "/trends", "/discounts"):
+    if path.startswith("/static") or path in ("/", "/trends", "/discounts", "/privacy", "/terms"):
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
@@ -234,6 +234,20 @@ async def serve_trends() -> FileResponse:
 @app.get("/discounts", include_in_schema=False)
 async def serve_discounts() -> FileResponse:
     """Serve the React SPA discounts route."""
+    spa_index = frontend_dist_dir / "index.html"
+    return FileResponse(spa_index if spa_index.exists() else (static_dir / "index.html"))
+
+
+@app.get("/privacy", include_in_schema=False)
+async def serve_privacy() -> FileResponse:
+    """Serve the React SPA privacy policy route."""
+    spa_index = frontend_dist_dir / "index.html"
+    return FileResponse(spa_index if spa_index.exists() else (static_dir / "index.html"))
+
+
+@app.get("/terms", include_in_schema=False)
+async def serve_terms() -> FileResponse:
+    """Serve the React SPA terms of use route."""
     spa_index = frontend_dist_dir / "index.html"
     return FileResponse(spa_index if spa_index.exists() else (static_dir / "index.html"))
 
