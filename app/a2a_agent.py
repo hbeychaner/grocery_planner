@@ -84,12 +84,18 @@ class GroceryMCPAgent:
             self.llm = create_llm_service(settings.agent_llm_provider, monitoring=self.monitoring)
         self.model = self.llm.model
 
-    def _build_mcp_client(self) -> Client:
+    def _build_mcp_client(self, obo_token: Optional[str] = None) -> Client:
         if isinstance(self.mcp_target, str):
-            return Client(StreamableHttpTransport(url=self.mcp_target))
+            return Client(StreamableHttpTransport(url=self.mcp_target, auth=obo_token))
         return Client(self.mcp_target)
 
-    async def run(self, user_message: str, context_id: Optional[str] = None) -> str:
+    async def run(
+        self,
+        user_message: str,
+        context_id: Optional[str] = None,
+        obo_token: Optional[str] = None,
+        anon_user_id: Optional[str] = None,
+    ) -> str:
         """Run a multi-turn LLM tool-calling loop over FastMCP tools with Langfuse tracing."""
         if not await self.llm.health_check():
             return (
@@ -97,38 +103,48 @@ class GroceryMCPAgent:
                 "Please check your `.env` settings (e.g. `GEMINI_API_KEY` or `OLLAMA_BASE_URL`)."
             )
 
-        with self.monitoring.trace_observation(
-            name="a2a-grocery-agent",
-            as_type="agent",
-            input_data={"message": user_message},
-            metadata={
-                "model": self.model,
-                "provider": self.llm.provider_name,
-                "protocol": "a2a-1.0",
-                "context_id": context_id,
-            },
-            flush_on_exit=True,
-        ) as root_span:
-            reply, stats = await self._run_loop(user_message)
-            if root_span is not None:
-                root_span.update(
-                    output={"reply": reply},
-                    metadata={
-                        "model": self.model,
-                        "provider": self.llm.provider_name,
-                        "turns": stats["turns"],
-                        "tool_calls": stats["tool_calls"],
-                        "total_input_tokens": stats["input_tokens"],
-                        "total_output_tokens": stats["output_tokens"],
-                        "total_cost_usd": round(stats["cost_usd"], 8),
-                    },
-                )
-            return reply
+        with self.monitoring.trace_context(
+            user_id=anon_user_id,
+            session_id=context_id,
+            tags=["a2a", "obo"] if obo_token else ["a2a"],
+        ):
+            with self.monitoring.trace_observation(
+                name="a2a-grocery-agent",
+                as_type="agent",
+                input_data={"message": user_message},
+                metadata={
+                    "model": self.model,
+                    "provider": self.llm.provider_name,
+                    "protocol": "a2a-1.0",
+                    "context_id": context_id,
+                    "obo_authenticated": bool(obo_token),
+                },
+                flush_on_exit=True,
+            ) as root_span:
+                reply, stats = await self._run_loop(user_message, obo_token=obo_token)
+                if root_span is not None:
+                    root_span.update(
+                        output={"reply": reply},
+                        metadata={
+                            "model": self.model,
+                            "provider": self.llm.provider_name,
+                            "turns": stats["turns"],
+                            "tool_calls": stats["tool_calls"],
+                            "total_input_tokens": stats["input_tokens"],
+                            "total_output_tokens": stats["output_tokens"],
+                            "total_cost_usd": round(stats["cost_usd"], 8),
+                        },
+                    )
+                return reply
 
-    async def _run_loop(self, user_message: str) -> tuple[str, Dict[str, Any]]:
+    async def _run_loop(
+        self,
+        user_message: str,
+        obo_token: Optional[str] = None,
+    ) -> tuple[str, Dict[str, Any]]:
         stats: Dict[str, Any] = {"turns": 0, "tool_calls": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
 
-        async with self._build_mcp_client() as mcp_client:
+        async with self._build_mcp_client(obo_token=obo_token) as mcp_client:
             with self.monitoring.trace_observation(
                 name="mcp-list-tools",
                 as_type="retriever",
@@ -235,82 +251,95 @@ class GroceryMCPAgent:
     async def stream_events(
         self,
         user_message: str,
+        obo_token: Optional[str] = None,
+        anon_user_id: Optional[str] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Stream structured thinking, tool call, tool result, and final answer events."""
-        async with self._build_mcp_client() as mcp_client:
-            mcp_tools = await mcp_client.list_tools()
-            tool_defs = [
-                {
-                    "name": t.name,
-                    "description": t.description or t.name,
-                    "parameters": t.input_schema or {"type": "object", "properties": {}},
-                }
-                for t in mcp_tools
-            ]
-            messages: List[Dict[str, Any]] = [{"role": "user", "content": user_message}]
+        with self.monitoring.trace_context(
+            user_id=anon_user_id,
+            tags=["chat-stream", "obo"] if obo_token else ["chat-stream"],
+        ):
+            with self.monitoring.trace_observation(
+                name="a2a-grocery-stream",
+                as_type="agent",
+                input_data={"message": user_message},
+                metadata={"model": self.model, "obo_authenticated": bool(obo_token)},
+                flush_on_exit=True,
+            ):
+                async with self._build_mcp_client(obo_token=obo_token) as mcp_client:
+                    mcp_tools = await mcp_client.list_tools()
+                    tool_defs = [
+                        {
+                            "name": t.name,
+                            "description": t.description or t.name,
+                            "parameters": t.input_schema or {"type": "object", "properties": {}},
+                        }
+                        for t in mcp_tools
+                    ]
+                    messages: List[Dict[str, Any]] = [{"role": "user", "content": user_message}]
 
-            for turn in range(6):
-                yield {"type": "thinking", "turn": turn + 1}
-                llm_resp = await self.llm.generate(
-                    messages,
-                    system_instruction=SYSTEM_INSTRUCTION,
-                    tools=tool_defs or None,
-                    temperature=0.2,
-                    max_tokens=1024,
-                )
-                if llm_resp is None:
-                    yield {"type": "answer", "text": "I couldn't generate a response."}
-                    return
+                    for turn in range(6):
+                        yield {"type": "thinking", "turn": turn + 1}
+                        llm_resp = await self.llm.generate(
+                            messages,
+                            system_instruction=SYSTEM_INSTRUCTION,
+                            tools=tool_defs or None,
+                            temperature=0.2,
+                            max_tokens=1024,
+                        )
+                        if llm_resp is None:
+                            yield {"type": "answer", "text": "I couldn't generate a response."}
+                            return
 
-                if not llm_resp.function_calls:
-                    yield {"type": "answer", "text": llm_resp.text or "I couldn't generate a response."}
-                    return
+                        if not llm_resp.function_calls:
+                            yield {"type": "answer", "text": llm_resp.text or "I couldn't generate a response."}
+                            return
 
-                if llm_resp.text and llm_resp.text.strip():
-                    yield {"type": "thought", "turn": turn + 1, "text": llm_resp.text.strip()}
+                        if llm_resp.text and llm_resp.text.strip():
+                            yield {"type": "thought", "turn": turn + 1, "text": llm_resp.text.strip()}
 
-                if llm_resp.raw_content:
-                    messages.append(llm_resp.raw_content)
+                        if llm_resp.raw_content:
+                            messages.append(llm_resp.raw_content)
 
-                tool_results: List[Dict[str, Any]] = []
-                for fc in llm_resp.function_calls:
-                    yield {"type": "tool_call", "turn": turn + 1, "name": fc.name, "args": fc.args}
-                    ok = True
-                    try:
-                        mcp_result = await mcp_client.call_tool(fc.name, fc.args)
-                        text_chunks = [
-                            getattr(c, "text", str(c))
-                            for c in (mcp_result.content or [])
-                        ]
-                        raw_output = "\n".join(text_chunks) if text_chunks else "{}"
-                        try:
-                            parsed_output: Any = json.loads(raw_output)
-                        except json.JSONDecodeError:
-                            parsed_output = {"result": raw_output}
-                    except Exception as exc:
-                        ok = False
-                        logger.warning("MCP tool '%s' failed: %s", fc.name, exc)
-                        parsed_output = {"error": str(exc)}
+                        tool_results: List[Dict[str, Any]] = []
+                        for fc in llm_resp.function_calls:
+                            yield {"type": "tool_call", "turn": turn + 1, "name": fc.name, "args": fc.args}
+                            ok = True
+                            try:
+                                mcp_result = await mcp_client.call_tool(fc.name, fc.args)
+                                text_chunks = [
+                                    getattr(c, "text", str(c))
+                                    for c in (mcp_result.content or [])
+                                ]
+                                raw_output = "\n".join(text_chunks) if text_chunks else "{}"
+                                try:
+                                    parsed_output: Any = json.loads(raw_output)
+                                except json.JSONDecodeError:
+                                    parsed_output = {"result": raw_output}
+                            except Exception as exc:
+                                ok = False
+                                logger.warning("MCP tool '%s' failed: %s", fc.name, exc)
+                                parsed_output = {"error": str(exc)}
 
-                    summary = json.dumps(parsed_output, ensure_ascii=False)
-                    if len(summary) > 220:
-                        summary = summary[:217] + "..."
-                    yield {
-                        "type": "tool_result",
-                        "turn": turn + 1,
-                        "name": fc.name,
-                        "ok": ok,
-                        "summary": summary,
-                    }
-                    tool_results.append({"name": fc.name, "response": parsed_output})
+                            summary = json.dumps(parsed_output, ensure_ascii=False)
+                            if len(summary) > 220:
+                                summary = summary[:217] + "..."
+                            yield {
+                                "type": "tool_result",
+                                "turn": turn + 1,
+                                "name": fc.name,
+                                "ok": ok,
+                                "summary": summary,
+                            }
+                            tool_results.append({"name": fc.name, "response": parsed_output})
 
-                if self.llm.provider_name == "ollama":
-                    for tr in tool_results:
-                        messages.append({"role": "tool", "content": json.dumps(tr["response"])})
-                else:
-                    messages.append({"role": "tool_results", "results": tool_results})
+                        if self.llm.provider_name == "ollama":
+                            for tr in tool_results:
+                                messages.append({"role": "tool", "content": json.dumps(tr["response"])})
+                        else:
+                            messages.append({"role": "tool_results", "results": tool_results})
 
-            yield {"type": "answer", "text": "Reached maximum tool-calling steps without a final answer."}
+                    yield {"type": "answer", "text": "Reached maximum tool-calling steps without a final answer."}
 
 
 class GroceryA2AExecutor(AgentExecutor):
@@ -425,6 +454,7 @@ def mount_a2a_agent(
         agent_card=agent_card,
     )
     from app.api.deps import get_auth_service
+    from app.services.auth import anonymize_user_id
 
     @fastapi_app.post("/api/v1/chat/stream", include_in_schema=False)
     async def stream_agent_chat(
@@ -446,9 +476,16 @@ def mount_a2a_agent(
                 },
             )
 
+        obo_token = auth_svc.mint_obo_jwt(user.id) if user is not None else auth_svc.mint_obo_jwt(user_key)
+        anon_id = anonymize_user_id(user_key)
+
         async def _event_gen() -> AsyncGenerator[str, None]:
             try:
-                async for ev in agent.stream_events(payload.message):
+                async for ev in agent.stream_events(
+                    payload.message,
+                    obo_token=obo_token,
+                    anon_user_id=anon_id,
+                ):
                     yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
             except Exception as exc:
                 yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"

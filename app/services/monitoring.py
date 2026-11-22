@@ -1,8 +1,8 @@
 import logging
 from contextlib import contextmanager
-from typing import Any, Dict, Iterator, Literal, Optional
+from typing import Any, Dict, Iterator, List, Literal, Optional
 
-from langfuse import Langfuse
+from langfuse import Langfuse, propagate_attributes
 
 from app.core.config import settings
 
@@ -202,6 +202,45 @@ class MonitoringService:
             flush_on_exit=flush_on_exit,
         ) as span:
             yield span
+
+    @contextmanager
+    def trace_context(
+        self,
+        user_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+    ) -> Iterator[None]:
+        """Propagate pseudonymous user_id/session_id/tags to all nested Langfuse observations."""
+        if not self._client or not any((user_id, session_id, tags)):
+            yield
+            return
+        try:
+            with propagate_attributes(
+                user_id=user_id,
+                session_id=session_id,
+                tags=tags,
+            ):
+                yield
+        except Exception as exc:
+            logger.debug(f"Langfuse trace_context skipped: {exc}")
+            yield
+
+    def record_user_activity(
+        self,
+        anon_user_id: str,
+        action: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Record a pseudonymous user action span in Langfuse."""
+        if not self._client or not anon_user_id:
+            return
+        with self.trace_context(user_id=anon_user_id, tags=["user-activity"]):
+            with self.trace_span(
+                name=f"activity:{action}",
+                input_data={"action": action},
+                metadata=metadata,
+            ):
+                pass
 
     def flush(self) -> None:
         """Flush buffered Langfuse events."""

@@ -7,15 +7,47 @@ import hashlib
 import hmac
 from pathlib import Path
 import secrets
-from typing import Optional
+import time
+from typing import Any, Dict, List, Optional
 import uuid
 
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from joserfc import jwt as jose_jwt
+from joserfc.jwk import RSAKey
 from pydantic import BaseModel
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, create_engine, delete, func, select, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 from sqlalchemy.pool import StaticPool
 
 from app.core.config import settings
+
+OBO_ISSUER = "https://grocery-planner.local"
+OBO_AUDIENCE = "grocery-planner-mcp"
+OBO_DEFAULT_SCOPES = ["groceries:read"]
+
+_rsa_priv = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+_OBO_PRIVATE_PEM = _rsa_priv.private_bytes(
+    encoding=serialization.Encoding.PEM,
+    format=serialization.PrivateFormat.PKCS8,
+    encryption_algorithm=serialization.NoEncryption(),
+)
+_OBO_PUBLIC_PEM = _rsa_priv.public_key().public_bytes(
+    encoding=serialization.Encoding.PEM,
+    format=serialization.PublicFormat.SubjectPublicKeyInfo,
+).decode("utf-8")
+_OBO_JWK = RSAKey.import_key(_OBO_PRIVATE_PEM)
+
+
+def anonymize_user_id(user_id: str) -> str:
+    """Return a stable pseudonymous identifier (no email/username) for observability."""
+    salt = (settings.api_auth_token or "grocery-planner-anon-salt").encode("utf-8")
+    digest = hmac.new(
+        salt,
+        user_id.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()[:12]
+    return f"usr_{digest}"
 
 
 class AuthBase(DeclarativeBase):
@@ -254,6 +286,49 @@ class AuthService:
             session.add(ChatUsageRecord(user_id=user_id))
             session.commit()
             return True, max(0, limit - used_today - 1)
+
+    @property
+    def obo_public_key_pem(self) -> str:
+        """Return the PEM-encoded RS256 public key for FastMCP JWTVerifier."""
+        return _OBO_PUBLIC_PEM
+
+    def mint_obo_jwt(
+        self,
+        user_id: str,
+        scopes: Optional[List[str]] = None,
+        ttl_seconds: int = 300,
+    ) -> str:
+        """Mint a short-lived RS256 OBO JWT for A2A -> FastMCP -> FastAPI delegation."""
+        now = int(time.time())
+        claims = {
+            "iss": OBO_ISSUER,
+            "aud": OBO_AUDIENCE,
+            "sub": user_id,
+            "anon_id": anonymize_user_id(user_id),
+            "scope": " ".join(scopes or OBO_DEFAULT_SCOPES),
+            "iat": now,
+            "exp": now + ttl_seconds,
+        }
+        return jose_jwt.encode({"alg": "RS256"}, claims, _OBO_JWK)
+
+    def verify_obo_jwt(self, token: str) -> Optional[Dict[str, Any]]:
+        """Verify an RS256 OBO JWT and return its claims if valid and unexpired."""
+        try:
+            decoded = jose_jwt.decode(token, _OBO_JWK)
+            claims = dict(decoded.claims)
+            now = int(time.time())
+            if claims.get("iss") != OBO_ISSUER:
+                return None
+            aud = claims.get("aud")
+            if aud != OBO_AUDIENCE and (not isinstance(aud, list) or OBO_AUDIENCE not in aud):
+                return None
+            if int(claims.get("exp", 0)) <= now:
+                return None
+            if not claims.get("sub"):
+                return None
+            return claims
+        except Exception:
+            return None
 
     def get_user_by_session(self, raw_token: Optional[str]) -> Optional[AuthUser]:
         """Resolve an active, unexpired session token to its AuthUser."""

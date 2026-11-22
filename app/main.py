@@ -133,6 +133,7 @@ async def security_and_cache_middleware(request: Request, call_next: Any) -> Res
         user = get_auth_service().get_user_by_session(session_cookie)
         auth_header = request.headers.get("Authorization", "")
         bearer = auth_header[7:].strip() if auth_header.startswith("Bearer ") else ""
+        obo_claims = get_auth_service().verify_obo_jwt(bearer) if bearer else None
         api_key = request.headers.get("X-API-Key", "")
         provided_tok = bearer or api_key
         has_api_token = bool(
@@ -140,8 +141,21 @@ async def security_and_cache_middleware(request: Request, call_next: Any) -> Res
             and provided_tok
             and secrets.compare_digest(provided_tok, settings.api_auth_token)
         )
-        if user is None and not has_api_token and not has_internal_mcp:
+        if user is None and obo_claims is None and not has_api_token and not has_internal_mcp:
             return JSONResponse(status_code=401, content={"detail": "Authentication required"})
+
+        if user is not None and request.method == "GET" and path in (
+            "/api/v1/compare",
+            "/api/v1/discounts",
+            "/api/v1/history/analytics",
+        ):
+            from app.services.auth import anonymize_user_id
+
+            get_monitoring_service().record_user_activity(
+                anonymize_user_id(user.id),
+                f"{request.method} {path}",
+                metadata={"query": request.url.query[:120]} if request.url.query else None,
+            )
 
     # Optional bearer / X-API-Key protection on mutating / ingestion endpoints
     if settings.api_auth_token and (
@@ -206,8 +220,12 @@ if static_dir.exists():
 app.include_router(api_v1_router)
 app.include_router(google_oauth_router)
 
-# Build and mount FastMCP server (exposing /api/v1/* as MCP tools at /mcp)
-mcp_server = create_mcp_server(app, internal_token=_INTERNAL_MCP_TOKEN)
+# Build and mount FastMCP server (exposing read-only /api/v1/* as MCP tools at /mcp)
+mcp_server = create_mcp_server(
+    app,
+    internal_token=_INTERNAL_MCP_TOKEN,
+    obo_public_key_pem=get_auth_service().obo_public_key_pem if settings.require_auth else None,
+)
 mcp_app = mcp_server.http_app(path="/")
 app.mount("/mcp", mcp_app)
 
