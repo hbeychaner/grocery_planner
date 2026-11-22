@@ -75,7 +75,7 @@ fi
 
 # 5. Package project (excluding .venv, node_modules, .git, local *.pem)
 TAR_PATH="/tmp/grocery_planner_deploy.tar.gz"
-tar -czf "$TAR_PATH" \
+COPYFILE_DISABLE=1 tar --no-xattrs --no-mac-metadata -czf "$TAR_PATH" \
   --exclude=".git" \
   --exclude=".venv" \
   --exclude="frontend/node_modules" \

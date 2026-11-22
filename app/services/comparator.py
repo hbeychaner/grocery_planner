@@ -3,7 +3,7 @@ from contextlib import nullcontext
 import logging
 from decimal import Decimal
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 import yaml
 
 from app.clients.base import BaseStoreClient
