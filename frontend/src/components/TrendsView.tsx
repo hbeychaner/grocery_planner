@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import {
+  Brush,
   CartesianGrid,
   Legend,
   Line,
   LineChart,
+  ReferenceArea,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -50,6 +52,10 @@ export function TrendsView() {
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [selectedCategory, setSelectedCategory] = useState("overall");
   const [seriesPoints, setSeriesPoints] = useState<SeriesPoint[]>([]);
+  const [zoomRange, setZoomRange] = useState<[number, number] | null>(null);
+  const [dragStart, setDragStart] = useState<string | null>(null);
+  const [dragEnd, setDragEnd] = useState<string | null>(null);
+  const [inspectedPoint, setInspectedPoint] = useState<SeriesPoint | null>(null);
   const [stats, setStats] = useState<{ tracked_items_count?: number; total_snapshots?: number; last_recorded_at?: string }>({});
   const [items, setItems] = useState<TrackedItem[]>([]);
   const [rankedItems, setRankedItems] = useState<TrackedItem[] | null>(null);
@@ -82,6 +88,8 @@ export function TrendsView() {
     if (seriesResp.ok) {
       const sData = await seriesResp.json();
       setSeriesPoints(sData.points || []);
+      setZoomRange(null);
+      setInspectedPoint(null);
     }
     if (itemsResp.ok) {
       const iData = await itemsResp.json();
@@ -299,16 +307,27 @@ export function TrendsView() {
                 {rebaseIndex ? " • Rebased to Index 100 at start of window" : ""}
               </p>
             </div>
-            <select
-              value={days}
-              onChange={(e) => setDays(e.target.value)}
-              className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white"
-            >
-              <option value="90">Last 3 months</option>
-              <option value="365">Last 12 months</option>
-              <option value="730">Last 24 months</option>
-              <option value="3650">All time</option>
-            </select>
+            <div className="flex items-center gap-2">
+              {zoomRange && (
+                <button
+                  type="button"
+                  onClick={() => setZoomRange(null)}
+                  className="text-xs px-2.5 py-1.5 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 font-medium cursor-pointer"
+                >
+                  Reset Zoom
+                </button>
+              )}
+              <select
+                value={days}
+                onChange={(e) => setDays(e.target.value)}
+                className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white"
+              >
+                <option value="90">Last 3 months</option>
+                <option value="365">Last 12 months</option>
+                <option value="730">Last 24 months</option>
+                <option value="3650">All time</option>
+              </select>
+            </div>
           </div>
 
           {activeMeta && (
@@ -322,23 +341,77 @@ export function TrendsView() {
             </div>
           )}
 
-          <div className="h-72 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={seriesPoints}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="recorded_at" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} width={56} />
-                <Tooltip />
-                <Legend wrapperStyle={{ fontSize: "11px" }} />
-                <Line type="monotone" dataKey="blended_avg" name="Blended" stroke="#0f172a" strokeWidth={2} connectNulls dot={false} />
-                <Line type="monotone" dataKey="avg_rohlik" name="Rohlík" stroke="#7c3aed" connectNulls dot={false} />
-                <Line type="monotone" dataKey="avg_kosik" name="Košík" stroke="#d97706" connectNulls dot={false} />
-                <Line type="monotone" dataKey="avg_bio" name="BIO" stroke="#16a34a" strokeDasharray="4 4" connectNulls dot={false} />
-                <Line type="monotone" dataKey="avg_csu" name="ČSÚ Avg" stroke="#64748b" strokeDasharray="2 3" connectNulls dot={false} />
-                <Line type="monotone" dataKey="avg_bls" name="US BLS" stroke="#2563eb" strokeDasharray="4 4" connectNulls dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
+          {(() => {
+            const visiblePoints = zoomRange
+              ? seriesPoints.slice(zoomRange[0], zoomRange[1] + 1)
+              : seriesPoints;
+            return (
+              <>
+                <div className="h-80 w-full select-none">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart
+                      data={visiblePoints}
+                      onMouseDown={(e) => {
+                        if (e && e.activeLabel) setDragStart(String(e.activeLabel));
+                      }}
+                      onMouseMove={(e) => {
+                        if (dragStart && e && e.activeLabel) setDragEnd(String(e.activeLabel));
+                      }}
+                      onMouseUp={() => {
+                        if (dragStart && dragEnd && dragStart !== dragEnd) {
+                          const i1 = seriesPoints.findIndex((p) => p.recorded_at === dragStart);
+                          const i2 = seriesPoints.findIndex((p) => p.recorded_at === dragEnd);
+                          if (i1 !== -1 && i2 !== -1) {
+                            setZoomRange([Math.min(i1, i2), Math.max(i1, i2)]);
+                          }
+                        }
+                        setDragStart(null);
+                        setDragEnd(null);
+                      }}
+                      onClick={(e) => {
+                        if (e && e.activePayload && e.activePayload.length > 0) {
+                          setInspectedPoint(e.activePayload[0].payload as SeriesPoint);
+                        }
+                      }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                      <XAxis dataKey="recorded_at" tick={{ fontSize: 11 }} />
+                      <YAxis domain={["auto", "auto"]} tick={{ fontSize: 11 }} width={56} />
+                      <Tooltip />
+                      <Legend wrapperStyle={{ fontSize: "11px" }} />
+                      <Line type="monotone" dataKey="blended_avg" name="Blended" stroke="#0f172a" strokeWidth={2} connectNulls dot={{ r: 2 }} activeDot={{ r: 5 }} />
+                      <Line type="monotone" dataKey="avg_rohlik" name="Rohlík" stroke="#7c3aed" connectNulls dot={{ r: 2 }} activeDot={{ r: 5 }} />
+                      <Line type="monotone" dataKey="avg_kosik" name="Košík" stroke="#d97706" connectNulls dot={{ r: 2 }} activeDot={{ r: 5 }} />
+                      <Line type="monotone" dataKey="avg_bio" name="BIO" stroke="#16a34a" strokeDasharray="4 4" connectNulls dot={{ r: 2 }} />
+                      <Line type="monotone" dataKey="avg_csu" name="ČSÚ Avg" stroke="#64748b" strokeDasharray="2 3" connectNulls dot={{ r: 2 }} activeDot={{ r: 5 }} />
+                      <Line type="monotone" dataKey="avg_bls" name="US BLS" stroke="#2563eb" strokeDasharray="4 4" connectNulls dot={{ r: 2 }} activeDot={{ r: 5 }} />
+                      {dragStart && dragEnd && (
+                        <ReferenceArea x1={dragStart} x2={dragEnd} strokeOpacity={0.3} fill="#6366f1" fillOpacity={0.15} />
+                      )}
+                      {!zoomRange && visiblePoints.length > 2 && (
+                        <Brush dataKey="recorded_at" height={22} stroke="#6366f1" />
+                      )}
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  Tip: Drag across months to zoom in, use the range slider, or click any point to inspect monthly values.
+                </p>
+                {inspectedPoint && (
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-semibold text-slate-800">Month: {inspectedPoint.recorded_at}</span>
+                    <div className="flex flex-wrap gap-3 text-slate-600">
+                      <span>Blended: {inspectedPoint.blended_avg ?? "—"}</span>
+                      <span>Rohlík: {inspectedPoint.avg_rohlik ?? "—"}</span>
+                      <span>Košík: {inspectedPoint.avg_kosik ?? "—"}</span>
+                      <span>ČSÚ: {inspectedPoint.avg_csu ?? "—"}</span>
+                      <span>US BLS: {inspectedPoint.avg_bls ?? "—"}</span>
+                    </div>
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </div>
       </div>
 

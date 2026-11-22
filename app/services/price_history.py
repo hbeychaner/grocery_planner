@@ -1058,6 +1058,15 @@ class PriceHistoryService:
                 )
             )
 
+        # Trim leading/trailing empty months so x-axis starts at the earliest month with real data
+        def _has_any_val(pt: CategorySeriesPoint) -> bool:
+            return any(
+                v is not None
+                for v in (pt.avg_rohlik, pt.avg_kosik, pt.blended_avg, pt.avg_bio, pt.avg_csu, pt.avg_bls)
+            )
+
+        points = [pt for pt in points if _has_any_val(pt)]
+
         if rebase_index and points:
             for field in ("avg_rohlik", "avg_kosik", "blended_avg", "avg_bio", "avg_csu", "avg_bls"):
                 base_val = next(
