@@ -1,4 +1,6 @@
+from datetime import datetime, timezone
 from decimal import Decimal
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 from fastapi.testclient import TestClient
 
@@ -7,7 +9,8 @@ from app.main import app
 from app.api.deps import get_comparison_service, get_price_history_service
 from app.models.enums import StoreType, UnitType
 from app.models.product import ProductSale, StoreProduct
-from app.services.price_history import TrackedItem
+from app.services.price_history import PriceHistoryService, PriceSnapshotRecord, TrackedItem
+from sqlalchemy.orm import Session
 
 
 def test_rohlik_parse_product_applies_premium_sale_and_keeps_all_sales() -> None:
@@ -137,6 +140,8 @@ def test_discounts_endpoint_filters_expiration_and_store() -> None:
     mock_hist.list_tracked_items = MagicMock(
         return_value=[TrackedItem(query="butter", query_cs="máslo", category="dairy")]
     )
+    mock_hist.get_latest_discount_snapshots = MagicMock(return_value=(None, []))
+    mock_hist.save_discount_snapshots = MagicMock(return_value=2)
 
     app.dependency_overrides[get_comparison_service] = lambda: mock_comp
     app.dependency_overrides[get_price_history_service] = lambda: mock_hist
@@ -160,3 +165,77 @@ def test_discounts_endpoint_filters_expiration_and_store() -> None:
         assert resp_q.json()["total_discounts"] == 2
     finally:
         app.dependency_overrides.clear()
+
+
+def test_discount_snapshots_and_daily_series_granularity() -> None:
+    svc = PriceHistoryService(db_path=Path(":memory:"))
+    svc.add_tracked_item("butter", category="dairy")
+
+    day1 = datetime(2026, 11, 20, 9, 0, tzinfo=timezone.utc)
+    day2 = datetime(2026, 11, 21, 9, 0, tzinfo=timezone.utc)
+    with Session(svc.engine) as session:
+        session.add_all(
+            [
+                PriceSnapshotRecord(
+                    item_query="butter",
+                    store="rohlik",
+                    product_id="1",
+                    product_name="Butter",
+                    price=44.9,
+                    unit_price=179.6,
+                    unit_type="kg",
+                    is_on_sale=False,
+                    recorded_at=day1,
+                ),
+                PriceSnapshotRecord(
+                    item_query="butter",
+                    store="rohlik",
+                    product_id="1",
+                    product_name="Butter",
+                    price=40.41,
+                    unit_price=161.64,
+                    unit_type="kg",
+                    is_on_sale=True,
+                    recorded_at=day2,
+                ),
+            ]
+        )
+        session.commit()
+
+    daily = svc.get_category_series(category="overall", days=30, mode="generic", granularity="daily")
+    assert [p.recorded_at for p in daily.points] == ["2026-11-20", "2026-11-21"]
+    assert daily.points[0].avg_rohlik == 179.6
+    assert daily.points[1].avg_rohlik == 161.64
+
+    monthly = svc.get_category_series(category="overall", days=30, mode="generic", granularity="monthly")
+    assert [p.recorded_at for p in monthly.points] == ["2026-11"]
+
+    prod = StoreProduct(
+        store=StoreType.ROHLIK,
+        product_id="1482618",
+        name="Miil Německé Máslo",
+        price=Decimal("40.41"),
+        original_price=Decimal("44.90"),
+        is_on_sale=True,
+        discount_percentage=10,
+        sale_type="premium",
+        unit_type=UnitType.KILOGRAM,
+        unit_price=Decimal("161.64"),
+        sales=[
+            ProductSale(
+                sale_type="premium",
+                price=Decimal("40.41"),
+                original_price=Decimal("44.90"),
+                discount_percentage=10,
+                welcome_price=True,
+            )
+        ],
+    )
+    saved = svc.save_discount_snapshots([("butter", "dairy", prod)], scanned_at=day2)
+    assert saved == 1
+    scanned_at, rows = svc.get_latest_discount_snapshots()
+    assert scanned_at is not None
+    assert len(rows) == 1
+    assert rows[0]["product_id"] == "1482618"
+    assert rows[0]["discount_percentage"] == 10
+    svc.close()

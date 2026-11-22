@@ -2,9 +2,10 @@ import asyncio
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Optional
+from typing import List, Optional, Tuple
 from pydantic import BaseModel
 
+from app.models.product import StoreProduct
 from app.services.comparator import PriceComparisonService
 from app.services.price_history import PriceHistoryService
 
@@ -46,11 +47,13 @@ class PriceTrackerRunner:
         items = self.history.list_tracked_items(active_only=True)
         if limit is not None and limit > 0:
             items = items[:limit]
+        category_by_query = {item.query: item.category for item in items}
 
         semaphore = asyncio.Semaphore(self.concurrency)
         succeeded = 0
         failed = 0
         snapshots_recorded = 0
+        discounted_products: List[Tuple[str, Optional[str], StoreProduct]] = []
 
         async def _check_one(query: str) -> None:
             nonlocal succeeded, failed, snapshots_recorded
@@ -59,6 +62,10 @@ class PriceTrackerRunner:
                     comparison = await self.comparator.compare_single_item(query)
                     count = self.history.record_comparison(comparison, recorded_at=started_dt)
                     snapshots_recorded += count
+                    cat = category_by_query.get(query)
+                    for cand in (*comparison.rohlik_candidates, *comparison.kosik_candidates):
+                        if cand.is_on_sale or cand.sales:
+                            discounted_products.append((query, cat, cand))
                     succeeded += 1
                     done = succeeded + failed
                     if done % 20 == 0 or done == len(items):
@@ -75,6 +82,9 @@ class PriceTrackerRunner:
                     await asyncio.sleep(self.delay_between_requests)
 
         await asyncio.gather(*(_check_one(item.query) for item in items))
+
+        if discounted_products and limit is None:
+            self.history.save_discount_snapshots(discounted_products, scanned_at=started_dt)
 
         finished_dt = datetime.now(timezone.utc)
         return TrackerRunResult(

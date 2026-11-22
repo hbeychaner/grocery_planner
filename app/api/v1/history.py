@@ -66,6 +66,11 @@ async def get_category_series(
         default=False,
         description="Rebase each series to Base = 100 at the first available month for relative inflation comparison",
     ),
+    granularity: str = Query(
+        default="daily",
+        pattern="^(daily|monthly)$",
+        description="Time bucket granularity: 'daily' (captures daily sales pricing) or 'monthly'",
+    ),
     history: PriceHistoryService = Depends(get_price_history_service),
 ) -> CategoryHistorySeries:
     """Return time-series average unit prices for a category or overall."""
@@ -75,6 +80,7 @@ async def get_category_series(
         mode=mode,
         normalize_by_income=normalize_by_income,
         rebase_index=rebase_index,
+        granularity=granularity,
     )
 
 

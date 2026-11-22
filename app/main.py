@@ -1,5 +1,9 @@
+import asyncio
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
+import logging
+import os
 from pathlib import Path
 import secrets
 import time
@@ -16,6 +20,7 @@ from app.api.deps import (
     get_ollama_service,
     get_price_history_service,
     get_rohlik_client,
+    get_tracker_runner,
     get_translation_cache,
 )
 from app.api.v1.auth import google_oauth_router
@@ -27,9 +32,45 @@ from app.mcp_server import create_mcp_server
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Application lifespan manager for connection pools, MCP session manager, and monitoring."""
+    """Application lifespan manager for connection pools, MCP session manager, daily tracker, and monitoring."""
+    logger = logging.getLogger(__name__)
+    tracker_task: asyncio.Task[None] | None = None
+
+    async def _daily_tracker_loop() -> None:
+        await asyncio.sleep(5)
+        while True:
+            try:
+                history = get_price_history_service()
+                last_ts = history.get_latest_store_snapshot_at()
+                now_utc = datetime.now(timezone.utc)
+                if last_ts is None or (now_utc - last_ts) >= timedelta(hours=20):
+                    logger.info("Starting daily price & discount tracker sweep...")
+                    result = await get_tracker_runner().run()
+                    logger.info(
+                        "Daily tracker sweep finished: %d/%d items, %d snapshots in %.1fs",
+                        result.succeeded,
+                        result.total_items,
+                        result.snapshots_recorded,
+                        result.duration_seconds,
+                    )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning(f"Daily tracker loop error: {exc}")
+            await asyncio.sleep(24 * 60 * 60)
+
+    if not os.environ.get("PYTEST_CURRENT_TEST"):
+        tracker_task = asyncio.create_task(_daily_tracker_loop())
+
     async with mcp_app.lifespan(app):
         yield
+
+    if tracker_task is not None:
+        tracker_task.cancel()
+        try:
+            await tracker_task
+        except asyncio.CancelledError:
+            pass
     # Cleanup clients on shutdown
     rohlik = get_rohlik_client()
     kosik = get_kosik_client()

@@ -1,10 +1,11 @@
+import json
 import logging
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from pydantic import BaseModel, Field
-from sqlalchemy import Boolean, DateTime, Float, Index, Integer, String, create_engine, func, inspect, select, text, update
+from sqlalchemy import Boolean, DateTime, Float, Index, Integer, String, Text, create_engine, delete, func, inspect, select, text, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 from sqlalchemy.pool import StaticPool
@@ -128,6 +129,37 @@ class PriceSnapshotRecord(PriceHistoryBase):
     is_bio: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_frozen: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     recorded_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class DiscountSnapshotRecord(PriceHistoryBase):
+    """ORM model for persisted daily discount snapshots across Rohlík and Košík."""
+
+    __tablename__ = "discount_snapshots"
+    __table_args__ = (
+        Index("idx_discounts_scanned_at", "scanned_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    item_query: Mapped[str] = mapped_column(String, nullable=False)
+    category: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    store: Mapped[str] = mapped_column(String, nullable=False)
+    product_id: Mapped[str] = mapped_column(String, nullable=False)
+    product_name: Mapped[str] = mapped_column(String, nullable=False)
+    brand: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    price: Mapped[float] = mapped_column(Float, nullable=False)
+    original_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    unit_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    unit_type: Mapped[str] = mapped_column(String, nullable=False, default="unknown")
+    discount_percentage: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    sale_type: Mapped[str] = mapped_column(String, nullable=False, default="sale")
+    sale_ends_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    remaining: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    image_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    sales_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    scanned_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
 
@@ -916,6 +948,7 @@ class PriceHistoryService:
         mode: str = "generic",
         normalize_by_income: bool = False,
         rebase_index: bool = False,
+        granularity: str = "daily",
     ) -> CategoryHistorySeries:
         """Compute time-series average unit prices for a category (or overall) across sweeps.
 
@@ -984,7 +1017,10 @@ class PriceHistoryService:
             ).all()
             fx_by_month = _extract_bls_fx_by_month(session) if normalize_by_income else {}
 
-        # Bucket snapshots by month (YYYY-MM) so all sources (Rohlík, Košík, ČSÚ, BLS) align cleanly
+        # Bucket snapshots by day (YYYY-MM-DD) or month (YYYY-MM)
+        use_daily = (granularity or "daily").strip().lower() == "daily"
+        fmt = "%Y-%m-%d" if use_daily else "%Y-%m"
+        slice_len = 10 if use_daily else 7
         buckets: Dict[str, Dict[str, List[float]]] = {}
         csu_month_items: Dict[str, Dict[str, List[float]]] = {}
         bls_month_items: Dict[str, Dict[str, List[float]]] = {}
@@ -992,9 +1028,9 @@ class PriceHistoryService:
             if s.unit_price is None:
                 continue
             ts_bucket = (
-                s.recorded_at.strftime("%Y-%m")
+                s.recorded_at.strftime(fmt)
                 if isinstance(s.recorded_at, datetime)
-                else str(s.recorded_at)[:7]
+                else str(s.recorded_at)[:slice_len]
             )
             b = buckets.setdefault(ts_bucket, {"rohlik": [], "kosik": [], "bio": [], "csu": [], "bls": []})
             val = float(s.unit_price)
@@ -1034,8 +1070,9 @@ class PriceHistoryService:
                 csu_vals = b["csu"]
                 bls_vals = b["bls"]
             blended_vals = r_vals + k_vals
-            cz_inc = _czech_median_income_for_month(ts_key) if normalize_by_income else 1.0
-            us_inc_czk = _midwest_us_median_income_czk_for_month(ts_key, fx_by_month) if normalize_by_income else 1.0
+            ym_key = ts_key[:7]
+            cz_inc = _czech_median_income_for_month(ym_key) if normalize_by_income else 1.0
+            us_inc_czk = _midwest_us_median_income_czk_for_month(ym_key, fx_by_month) if normalize_by_income else 1.0
 
             def _pt_avg(vals: List[float], is_us: bool = False) -> Optional[float]:
                 if not vals:
@@ -1081,6 +1118,128 @@ class PriceHistoryService:
 
         display = "Overall (All Categories)" if cat_norm == "overall" else cat_norm.replace("_", " ").title()
         return CategoryHistorySeries(category=cat_norm, display_name=display, points=points)
+
+    def get_latest_store_snapshot_at(self) -> Optional[datetime]:
+        """Return the timestamp of the most recent live store (Rohlík/Košík) snapshot."""
+        with Session(self.engine) as session:
+            ts = session.scalar(
+                select(func.max(PriceSnapshotRecord.recorded_at)).where(
+                    PriceSnapshotRecord.store.in_(("rohlik", "kosik"))
+                )
+            )
+            if ts is not None and ts.tzinfo is None:
+                return ts.replace(tzinfo=timezone.utc)
+            return ts
+
+    def save_discount_snapshots(
+        self,
+        products: List[Tuple[str, Optional[str], StoreProduct]],
+        scanned_at: Optional[datetime] = None,
+    ) -> int:
+        """Persist a batch of discounted products for instant Discount Tracker loading."""
+        ts = scanned_at or datetime.now(timezone.utc)
+        cutoff = ts - timedelta(days=7)
+        seen: set[tuple[str, str]] = set()
+        records: List[DiscountSnapshotRecord] = []
+
+        for item_query, category, prod in products:
+            if not prod.sales and not prod.is_on_sale:
+                continue
+            key = (prod.store.value, prod.product_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            sales_payload = [s.model_dump(mode="json") for s in prod.sales]
+            if not sales_payload and prod.is_on_sale:
+                sales_payload = [
+                    {
+                        "sale_type": prod.sale_type or "sale",
+                        "price": str(prod.price),
+                        "original_price": str(prod.original_price) if prod.original_price is not None else None,
+                        "unit_price": str(prod.unit_price) if prod.unit_price is not None else None,
+                        "discount_percentage": prod.discount_percentage,
+                        "started_at": None,
+                        "ends_at": prod.sale_ends_at,
+                        "remaining": None,
+                        "welcome_price": False,
+                        "unlimited_amount": False,
+                    }
+                ]
+            best_pct = max((s.get("discount_percentage") or 0 for s in sales_payload), default=0) or prod.discount_percentage
+            best_sale = max(sales_payload, key=lambda s: (s.get("discount_percentage") or 0, -float(s.get("price") or 0)))
+            records.append(
+                DiscountSnapshotRecord(
+                    item_query=item_query,
+                    category=category,
+                    store=prod.store.value,
+                    product_id=prod.product_id,
+                    product_name=prod.name,
+                    brand=prod.brand,
+                    price=float(prod.price),
+                    original_price=float(prod.original_price) if prod.original_price is not None else None,
+                    unit_price=float(prod.unit_price) if prod.unit_price is not None else None,
+                    unit_type=prod.unit_type.value,
+                    discount_percentage=best_pct,
+                    sale_type=str(best_sale.get("sale_type") or prod.sale_type or "sale"),
+                    sale_ends_at=best_sale.get("ends_at") or prod.sale_ends_at,
+                    remaining=best_sale.get("remaining"),
+                    url=prod.url,
+                    image_url=prod.image_url,
+                    sales_json=json.dumps(sales_payload),
+                    scanned_at=ts,
+                )
+            )
+
+        with Session(self.engine) as session:
+            session.execute(delete(DiscountSnapshotRecord).where(DiscountSnapshotRecord.scanned_at < cutoff))
+            if records:
+                session.add_all(records)
+            session.commit()
+        return len(records)
+
+    def get_latest_discount_snapshots(
+        self,
+        store: Optional[str] = None,
+    ) -> Tuple[Optional[datetime], List[Dict[str, Any]]]:
+        """Return (scanned_at, raw_rows) from the most recent persisted discount scan."""
+        with Session(self.engine) as session:
+            latest_ts = session.scalar(select(func.max(DiscountSnapshotRecord.scanned_at)))
+            if latest_ts is None:
+                return None, []
+            stmt = select(DiscountSnapshotRecord).where(DiscountSnapshotRecord.scanned_at == latest_ts)
+            if store:
+                stmt = stmt.where(DiscountSnapshotRecord.store == store)
+            rows = session.scalars(stmt).all()
+            out: List[Dict[str, Any]] = []
+            for r in rows:
+                try:
+                    sales = json.loads(r.sales_json) if r.sales_json else []
+                except Exception:
+                    sales = []
+                out.append(
+                    {
+                        "item_query": r.item_query,
+                        "category": r.category,
+                        "store": r.store,
+                        "product_id": r.product_id,
+                        "product_name": r.product_name,
+                        "brand": r.brand,
+                        "price": r.price,
+                        "original_price": r.original_price,
+                        "unit_price": r.unit_price,
+                        "unit_type": r.unit_type,
+                        "discount_percentage": r.discount_percentage,
+                        "sale_type": r.sale_type,
+                        "sale_ends_at": r.sale_ends_at,
+                        "remaining": r.remaining,
+                        "url": r.url,
+                        "image_url": r.image_url,
+                        "sales": sales,
+                    }
+                )
+            if latest_ts.tzinfo is None:
+                latest_ts = latest_ts.replace(tzinfo=timezone.utc)
+            return latest_ts, out
 
     def close(self) -> None:
         """Dispose SQLAlchemy engine connection pool."""

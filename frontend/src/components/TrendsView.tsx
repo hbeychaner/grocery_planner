@@ -48,6 +48,7 @@ export function TrendsView() {
   const [mode, setMode] = useState<"comparison" | "generic">("comparison");
   const [normalizeByIncome, setNormalizeByIncome] = useState(false);
   const [rebaseIndex, setRebaseIndex] = useState(false);
+  const [granularity, setGranularity] = useState<"daily" | "monthly">("daily");
   const [days, setDays] = useState("730");
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [selectedCategory, setSelectedCategory] = useState("overall");
@@ -71,12 +72,13 @@ export function TrendsView() {
     m = mode,
     norm = normalizeByIncome,
     d = days,
-    rebase = rebaseIndex
+    rebase = rebaseIndex,
+    gran = granularity
   ) {
     const [analyticsResp, seriesResp, itemsResp] = await Promise.all([
       fetch(`/api/v1/history/analytics?mode=${m}&normalize_by_income=${norm}`),
       fetch(
-        `/api/v1/history/analytics/series?category=${encodeURIComponent(cat)}&days=${d}&mode=${m}&normalize_by_income=${norm}&rebase_index=${rebase}`
+        `/api/v1/history/analytics/series?category=${encodeURIComponent(cat)}&days=${d}&mode=${m}&normalize_by_income=${norm}&rebase_index=${rebase}&granularity=${gran}`
       ),
       fetch("/api/v1/history/items"),
     ]);
@@ -100,7 +102,7 @@ export function TrendsView() {
 
   useEffect(() => {
     loadDashboard();
-  }, [selectedCategory, mode, normalizeByIncome, days, rebaseIndex]);
+  }, [selectedCategory, mode, normalizeByIncome, days, rebaseIndex, granularity]);
 
   useEffect(() => {
     const q = filterText.trim();
@@ -317,6 +319,14 @@ export function TrendsView() {
                   Reset Zoom
                 </button>
               )}
+              <select
+                value={granularity}
+                onChange={(e) => setGranularity(e.target.value as "daily" | "monthly")}
+                className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white"
+              >
+                <option value="daily">Daily</option>
+                <option value="monthly">Monthly</option>
+              </select>
               <select
                 value={days}
                 onChange={(e) => setDays(e.target.value)}

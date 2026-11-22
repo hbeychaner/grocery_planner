@@ -1,11 +1,12 @@
 import asyncio
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import List, Optional, Tuple
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
 from app.api.deps import get_comparison_service, get_price_history_service
-from app.models.enums import StoreType
+from app.models.enums import StoreType, UnitType
 from app.models.product import ProductSale, StoreProduct
 from app.services.comparator import PriceComparisonService
 from app.services.price_history import PriceHistoryService
@@ -29,6 +30,7 @@ class DiscountTrackerResponse(BaseModel):
     scanned_queries: int = Field(..., ge=0)
     total_discounts: int = Field(..., ge=0)
     fetched_at: str = Field(..., description="UTC ISO timestamp of scan")
+    cached: bool = Field(default=False, description="Whether results were served from persisted daily scan")
     items: List[DiscountedProductItem] = Field(default_factory=list)
 
 
@@ -76,10 +78,78 @@ async def get_active_discounts(
         le=50,
         description="Maximum number of watchlist items to scan when no query is given",
     ),
+    refresh: bool = Query(
+        default=False,
+        description="Force a live scan instead of returning the persisted daily discount snapshot",
+    ),
     comparator: PriceComparisonService = Depends(get_comparison_service),
     history: PriceHistoryService = Depends(get_price_history_service),
 ) -> DiscountTrackerResponse:
-    """Scan live store listings for active discounts, countdowns, and remaining stock."""
+    """Return active discounts from the persisted daily scan or run a live store scan."""
+    if not (q and q.strip()) and not refresh:
+        scanned_at, cached_rows = history.get_latest_discount_snapshots(
+            store=store.value if store else None
+        )
+        if scanned_at is not None and cached_rows:
+            cached_items: List[DiscountedProductItem] = []
+            for r in cached_rows:
+                sales_objs = [ProductSale(**s) for s in r.get("sales", [])]
+                try:
+                    ut = UnitType(r["unit_type"])
+                except ValueError:
+                    ut = UnitType.UNKNOWN
+                prod = StoreProduct(
+                    store=StoreType(r["store"]),
+                    product_id=r["product_id"],
+                    name=r["product_name"],
+                    brand=r.get("brand"),
+                    price=Decimal(str(r["price"])),
+                    original_price=(
+                        Decimal(str(r["original_price"]))
+                        if r.get("original_price") is not None
+                        else None
+                    ),
+                    is_on_sale=True,
+                    discount_percentage=r.get("discount_percentage"),
+                    sale_type=r.get("sale_type"),
+                    sale_ends_at=r.get("sale_ends_at"),
+                    sales=sales_objs,
+                    unit_type=ut,
+                    unit_price=(
+                        Decimal(str(r["unit_price"]))
+                        if r.get("unit_price") is not None
+                        else None
+                    ),
+                    url=r.get("url"),
+                    image_url=r.get("image_url"),
+                )
+                best_sale, filtered_sales = _pick_best_sale(prod, include_expiration=include_expiration)
+                if not best_sale:
+                    continue
+                cached_items.append(
+                    DiscountedProductItem(
+                        query=r["item_query"],
+                        category=r.get("category"),
+                        product=prod,
+                        best_sale=best_sale,
+                        all_sales=filtered_sales,
+                    )
+                )
+            cached_items.sort(
+                key=lambda item: (
+                    -(item.best_sale.discount_percentage or 0 if item.best_sale else 0),
+                    item.best_sale.ends_at or "9999-12-31" if item.best_sale else "9999-12-31",
+                    float(item.product.price),
+                )
+            )
+            return DiscountTrackerResponse(
+                scanned_queries=len({r["item_query"] for r in cached_rows}),
+                total_discounts=len(cached_items),
+                fetched_at=scanned_at.isoformat(),
+                cached=True,
+                items=cached_items,
+            )
+
     targets: List[Tuple[str, str, Optional[str]]] = []
     if q and q.strip():
         clean_q = q.strip()
@@ -130,12 +200,15 @@ async def get_active_discounts(
 
     seen_keys: set[tuple[StoreType, str]] = set()
     discounted_items: List[DiscountedProductItem] = []
+    to_persist: List[Tuple[str, Optional[str], StoreProduct]] = []
 
     for group in scanned:
         for label, category, product in group:
             key = (product.store, product.product_id)
             if key in seen_keys:
                 continue
+            if product.sales or product.is_on_sale:
+                to_persist.append((label, category, product))
             best_sale, filtered_sales = _pick_best_sale(product, include_expiration=include_expiration)
             if not best_sale:
                 continue
@@ -150,6 +223,10 @@ async def get_active_discounts(
                 )
             )
 
+    now_dt = datetime.now(timezone.utc)
+    if not (q and q.strip()) and store is None and to_persist:
+        history.save_discount_snapshots(to_persist, scanned_at=now_dt)
+
     discounted_items.sort(
         key=lambda item: (
             -(item.best_sale.discount_percentage or 0 if item.best_sale else 0),
@@ -161,6 +238,7 @@ async def get_active_discounts(
     return DiscountTrackerResponse(
         scanned_queries=len(targets),
         total_discounts=len(discounted_items),
-        fetched_at=datetime.now(timezone.utc).isoformat(),
+        fetched_at=now_dt.isoformat(),
+        cached=False,
         items=discounted_items,
     )

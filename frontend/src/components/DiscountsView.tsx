@@ -44,6 +44,7 @@ interface DiscountTrackerResponse {
   scanned_queries: number;
   total_discounts: number;
   fetched_at: string;
+  cached?: boolean;
   items: DiscountedProductItem[];
 }
 
@@ -101,13 +102,14 @@ export function DiscountsView() {
   const [data, setData] = useState<DiscountTrackerResponse | null>(null);
 
   const loadDiscounts = useCallback(
-    async (searchTerm: string, incExp: boolean) => {
+    async (searchTerm: string, incExp: boolean, forceRefresh = false) => {
       setLoading(true);
       setError(null);
       try {
         const params = new URLSearchParams();
         if (searchTerm.trim()) params.set("q", searchTerm.trim());
         params.set("include_expiration", String(incExp));
+        if (forceRefresh) params.set("refresh", "true");
         const resp = await fetch(`/api/v1/discounts?${params.toString()}`);
         if (!resp.ok) {
           const body = await resp.json().catch(() => ({}));
@@ -208,7 +210,7 @@ export function DiscountsView() {
           </div>
           <button
             type="button"
-            onClick={() => loadDiscounts(activeQuery, includeExpiration)}
+            onClick={() => loadDiscounts(activeQuery, includeExpiration, true)}
             disabled={loading}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 cursor-pointer"
           >
