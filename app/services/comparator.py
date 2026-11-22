@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import nullcontext
 import logging
 from decimal import Decimal
 from pathlib import Path
@@ -120,39 +121,18 @@ class PriceComparisonService:
         translations: Dict[str, str] = {}
         source_language: Optional[str] = None
 
-        if monitoring is not None:
-            with monitoring.trace_observation(
-                name="resolve-query-translation",
-                as_type="retriever",
-                input_data={"query": clean_query, "target_lang": settings.default_catalog_language},
-            ) as tr_span:
-                if staple:
-                    rohlik_term = staple.rohlik_query
-                    kosik_term = staple.kosik_query
-                    translated_term = staple.name_cs
-                    category = staple.category
-                    translations = {"en": staple.name_en, "cs": staple.name_cs}
-                    labels_by_language = staple.labels or {"en": staple.keywords}
-                    source_language = "en"
-                    tr_source = "staple_catalog"
-                else:
-                    t_res = await self.bilingual.translate_query_async(
-                        clean_query, ollama_service=self.ollama
-                    )
-                    translated_term = t_res.primary_term
-                    rohlik_term = translated_term
-                    kosik_term = translated_term
-                    category = t_res.category
-                    translations = t_res.translations
-                    labels_by_language = t_res.labels
-                    source_language = t_res.source_language
-                    tr_source = "sqlite_cache" if t_res.from_cache else "llm_or_dictionary"
-                if tr_span is not None:
-                    tr_span.update(
-                        output={"translated_term": translated_term, "source": tr_source},
-                        metadata={"translations": translations, "category": category},
-                    )
-        else:
+        def _obs(name: str, as_type: str, input_data: Dict[str, Any]) -> Any:
+            return (
+                monitoring.trace_observation(name=name, as_type=as_type, input_data=input_data)
+                if monitoring is not None
+                else nullcontext(None)
+            )
+
+        with _obs(
+            "resolve-query-translation",
+            "retriever",
+            {"query": clean_query, "target_lang": settings.default_catalog_language},
+        ) as tr_span:
             if staple:
                 rohlik_term = staple.rohlik_query
                 kosik_term = staple.kosik_query
@@ -161,6 +141,7 @@ class PriceComparisonService:
                 translations = {"en": staple.name_en, "cs": staple.name_cs}
                 labels_by_language = staple.labels or {"en": staple.keywords}
                 source_language = "en"
+                tr_source = "staple_catalog"
             else:
                 t_res = await self.bilingual.translate_query_async(
                     clean_query, ollama_service=self.ollama
@@ -172,6 +153,12 @@ class PriceComparisonService:
                 translations = t_res.translations
                 labels_by_language = t_res.labels
                 source_language = t_res.source_language
+                tr_source = "sqlite_cache" if t_res.from_cache else "llm_or_dictionary"
+            if tr_span is not None:
+                tr_span.update(
+                    output={"translated_term": translated_term, "source": tr_source},
+                    metadata={"translations": translations, "category": category},
+                )
 
         flat_labels = labels_by_language.get(
             settings.default_language,
@@ -179,38 +166,18 @@ class PriceComparisonService:
         )
 
         # Fetch store candidates concurrently with traced tool spans
-        async def _search_rohlik() -> List[StoreProduct]:
-            if monitoring is None:
-                res = await self.rohlik.search(rohlik_term, limit=10)
-                return res if isinstance(res, list) else []
-            with monitoring.trace_observation(
-                name="search-rohlik-catalog",
-                as_type="tool",
-                input_data={"query": rohlik_term, "limit": 10},
-            ) as span:
-                res = await self.rohlik.search(rohlik_term, limit=10)
-                items = res if isinstance(res, list) else []
-                if span is not None:
-                    span.update(output={"count": len(items), "top": [p.name for p in items[:3]]})
-                return items
-
-        async def _search_kosik() -> List[StoreProduct]:
-            if monitoring is None:
-                res = await self.kosik.search(kosik_term, limit=10)
-                return res if isinstance(res, list) else []
-            with monitoring.trace_observation(
-                name="search-kosik-catalog",
-                as_type="tool",
-                input_data={"query": kosik_term, "limit": 10},
-            ) as span:
-                res = await self.kosik.search(kosik_term, limit=10)
+        async def _search_store(span_name: str, client: BaseStoreClient, term: str) -> List[StoreProduct]:
+            with _obs(span_name, "tool", {"query": term, "limit": 10}) as span:
+                res = await client.search(term, limit=10)
                 items = res if isinstance(res, list) else []
                 if span is not None:
                     span.update(output={"count": len(items), "top": [p.name for p in items[:3]]})
                 return items
 
         r_results, k_results = await asyncio.gather(
-            _search_rohlik(), _search_kosik(), return_exceptions=True
+            _search_store("search-rohlik-catalog", self.rohlik, rohlik_term),
+            _search_store("search-kosik-catalog", self.kosik, kosik_term),
+            return_exceptions=True,
         )
 
         r_list: List[StoreProduct] = r_results if isinstance(r_results, list) else []
@@ -233,32 +200,27 @@ class PriceComparisonService:
             if isinstance(k_idx_res, list):
                 k_list = [k_list[i] for i in k_idx_res if 0 <= i < len(k_list)]
 
-        if monitoring is not None:
-            with monitoring.trace_observation(
-                name="match-and-rank-products",
-                as_type="evaluator",
-                input_data={
-                    "query": clean_query,
-                    "query_cs": translated_term,
-                    "rohlik_candidates": len(r_list),
-                    "kosik_candidates": len(k_list),
-                },
-            ) as match_span:
-                best_pair = self.matcher.find_best_pair(clean_query, translated_term, r_list, k_list)
-                r_filtered = self.matcher._filter_relevant_products(translated_term, r_list, clean_query)
-                k_filtered = self.matcher._filter_relevant_products(translated_term, k_list, clean_query)
-                if match_span is not None:
-                    match_span.update(
-                        output={
-                            "matched": best_pair is not None,
-                            "confidence": best_pair.match_confidence if best_pair else 0.0,
-                            "advantage": best_pair.advantage.value if best_pair else "unavailable",
-                        }
-                    )
-        else:
+        with _obs(
+            "match-and-rank-products",
+            "evaluator",
+            {
+                "query": clean_query,
+                "query_cs": translated_term,
+                "rohlik_candidates": len(r_list),
+                "kosik_candidates": len(k_list),
+            },
+        ) as match_span:
             best_pair = self.matcher.find_best_pair(clean_query, translated_term, r_list, k_list)
             r_filtered = self.matcher._filter_relevant_products(translated_term, r_list, clean_query)
             k_filtered = self.matcher._filter_relevant_products(translated_term, k_list, clean_query)
+            if match_span is not None:
+                match_span.update(
+                    output={
+                        "matched": best_pair is not None,
+                        "confidence": best_pair.match_confidence if best_pair else 0.0,
+                        "advantage": best_pair.advantage.value if best_pair else "unavailable",
+                    }
+                )
 
         # If filtering emptied both lists, fall back to raw lists
         if not r_filtered and not k_filtered:
