@@ -182,3 +182,40 @@ async def test_ollama_caches_identical_prompts() -> None:
         assert first == [0]
         assert second == [0]
         assert mock_client.post.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_gemini_filter_relevant_indices_disables_thinking() -> None:
+    """Gemini relevance filtering must disable thinking tokens so JSON output is not truncated."""
+    from types import SimpleNamespace
+    from app.services.llm import GeminiLLMService
+
+    service = GeminiLLMService(api_key="test-key", model="gemini-3.5-flash", enabled=True)
+    fake_resp = SimpleNamespace(
+        text='{"relevant_indices": [0]}',
+        function_calls=[],
+        candidates=[],
+        usage_metadata=SimpleNamespace(
+            prompt_token_count=20,
+            candidates_token_count=10,
+            cached_content_token_count=0,
+            thoughts_token_count=0,
+            total_token_count=30,
+        ),
+    )
+
+    with patch("app.services.llm.genai.Client") as mock_client_cls:
+        mock_client = mock_client_cls.return_value
+        mock_client.aio.models.generate_content = AsyncMock(return_value=fake_resp)
+
+        indices = await service.filter_relevant_indices(
+            "blueberries",
+            ["Borůvky, balení", "Activia Kefír borůvka", "Miil Krémový jogurt borůvkový"],
+            query_cs="borůvky",
+        )
+
+        assert indices == [0]
+        call_cfg = mock_client.aio.models.generate_content.call_args.kwargs["config"]
+        assert call_cfg.thinking_config is not None
+        assert call_cfg.thinking_config.thinking_budget == 0
+        assert call_cfg.max_output_tokens >= 256

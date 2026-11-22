@@ -187,6 +187,7 @@ class BaseLLMService(ABC):
         tools: Optional[List[Dict[str, Any]]] = None,
         temperature: float = 0.2,
         max_tokens: int = 512,
+        thinking: Optional[bool] = None,
     ) -> Optional[LLMResponse]:
         """Execute a chat/generation turn with optional tool definitions."""
 
@@ -232,7 +233,8 @@ Return ONLY JSON:
                 resp = await self.generate(
                     [{"role": "user", "content": prompt}],
                     temperature=0.1,
-                    max_tokens=256,
+                    max_tokens=512,
+                    thinking=False,
                 )
                 if resp and resp.text:
                     data = self._extract_json(resp.text)
@@ -313,7 +315,8 @@ Return ONLY valid JSON: {{"relevant_indices": [0, 1]}}"""
                 resp = await self.generate(
                     [{"role": "user", "content": prompt}],
                     temperature=0.0,
-                    max_tokens=128,
+                    max_tokens=256,
+                    thinking=False,
                 )
                 if resp and resp.text:
                     data = self._extract_json(resp.text)
@@ -435,16 +438,19 @@ class OllamaLLMService(BaseLLMService):
         tools: Optional[List[Dict[str, Any]]] = None,
         temperature: float = 0.2,
         max_tokens: int = 512,
+        thinking: Optional[bool] = None,
     ) -> Optional[LLMResponse]:
         if not self.enabled:
             return None
+
+        use_think = self.think if thinking is None else thinking
 
         # Single-turn prompt without tools uses /api/generate (preserves existing test mocks & prompt cache)
         if len(messages) == 1 and not tools and not system_instruction:
             payload: Dict[str, Any] = {
                 "model": self.model,
                 "prompt": str(messages[0].get("content", "")),
-                "think": self.think,
+                "think": use_think,
                 "stream": False,
                 "options": {"num_predict": max_tokens, "temperature": temperature},
             }
@@ -473,7 +479,7 @@ class OllamaLLMService(BaseLLMService):
         chat_payload: Dict[str, Any] = {
             "model": self.model,
             "messages": chat_messages,
-            "think": self.think,
+            "think": use_think,
             "stream": False,
             "options": {"num_predict": max_tokens, "temperature": temperature},
         }
@@ -555,6 +561,7 @@ class GeminiLLMService(BaseLLMService):
         tools: Optional[List[Dict[str, Any]]] = None,
         temperature: float = 0.2,
         max_tokens: int = 1024,
+        thinking: Optional[bool] = None,
     ) -> Optional[LLMResponse]:
         if not self.enabled or not self.api_key:
             return None
@@ -563,7 +570,7 @@ class GeminiLLMService(BaseLLMService):
         cache_key: Optional[str] = None
         if len(messages) == 1 and not tools:
             cache_key = hashlib.sha256(
-                f"gemini|{self.model}|{system_instruction}|{temperature}|{messages[0].get('content', '')}".encode("utf-8")
+                f"gemini|{self.model}|{system_instruction}|{temperature}|{thinking}|{messages[0].get('content', '')}".encode("utf-8")
             ).hexdigest()
             cached = self._cache_get(cache_key)
             if cached is not None:
@@ -579,11 +586,17 @@ class GeminiLLMService(BaseLLMService):
             )
             for t in (tools or [])
         ]
+        thinking_cfg = (
+            genai_types.ThinkingConfig(thinking_budget=0)
+            if thinking is False
+            else None
+        )
         config = genai_types.GenerateContentConfig(
             system_instruction=system_instruction,
             tools=[genai_types.Tool(function_declarations=declarations)] if declarations else None,
             temperature=temperature,
             max_output_tokens=max_tokens,
+            thinking_config=thinking_cfg,
         )
 
         contents: List[genai_types.Content] = []
