@@ -1,4 +1,4 @@
-.PHONY: start stop stop-all restart test health open-browser langfuse-up langfuse-down track-prices caddy-start caddy-stop help
+.PHONY: start stop stop-all restart test health open-browser langfuse-up langfuse-down track-prices caddy-start caddy-stop tunnel-start tunnel-stop help
 
 PYTHON := ./.venv/bin/python3
 UVICORN := ./.venv/bin/uvicorn
@@ -43,6 +43,8 @@ help:
 	@echo "  make track-prices  Run weekly grocery price tracking sweep (all items)"
 	@echo "  make caddy-start   Start Caddy HTTPS reverse proxy (requires PUBLIC_DOMAIN in .env)"
 	@echo "  make caddy-stop    Stop Caddy reverse proxy"
+	@echo "  make tunnel-start  Start open-source cloudflared public HTTPS tunnel (no port forwarding)"
+	@echo "  make tunnel-stop   Stop cloudflared public HTTPS tunnel"
 
 langfuse-up:
 	@echo "Starting self-hosted Langfuse (Docker Compose)..."
@@ -143,3 +145,19 @@ caddy-start:
 
 caddy-stop:
 	@pkill -f "caddy run --config Caddyfile" 2>/dev/null && echo "Caddy stopped." || echo "Caddy not running."
+
+tunnel-start:
+	@pkill -f "cloudflared tunnel" 2>/dev/null || true
+	@nohup cloudflared tunnel --url https://localhost:8000 --no-tls-verify >/tmp/cloudflared_grocery.log 2>&1 &
+	@echo "Waiting for Cloudflare Tunnel URL..."
+	@for i in $$(seq 1 15); do \
+		URL=$$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' /tmp/cloudflared_grocery.log 2>/dev/null | head -n 1); \
+		if [ -n "$$URL" ]; then \
+			echo "Public HTTPS URL: $$URL"; \
+			break; \
+		fi; \
+		sleep 1; \
+	done
+
+tunnel-stop:
+	@pkill -f "cloudflared tunnel" 2>/dev/null && echo "Cloudflare Tunnel stopped." || echo "Cloudflare Tunnel not running."
